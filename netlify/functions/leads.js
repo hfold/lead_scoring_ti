@@ -19,6 +19,7 @@ const ACCENTURE_SEED = [
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Content-Type': 'application/json',
 };
 
@@ -28,33 +29,63 @@ exports.handler = async (event) => {
   }
 
   const store = getStore('leads');
+  const STORE_KEY = 'pipeline_v1'; // Versione rinfrescata della chiave
 
   // GET: return all leads
   if (event.httpMethod === 'GET') {
     try {
-      const data = await store.get('pipeline', { type: 'json' });
-      const leads = data || ACCENTURE_SEED;
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(leads) };
+      const data = await store.get(STORE_KEY, { type: 'json' });
+      const leads = data && Array.isArray(data) ? data : ACCENTURE_SEED;
+      return { 
+        statusCode: 200, 
+        headers: CORS, 
+        body: JSON.stringify(leads) 
+      };
     } catch (err) {
+      console.error("Errore lettura Blobs:", err);
       return { statusCode: 200, headers: CORS, body: JSON.stringify(ACCENTURE_SEED) };
     }
   }
 
-  // POST: save new lead (append to list)
+  // POST: save new lead
   if (event.httpMethod === 'POST') {
     try {
-      const newLead = JSON.parse(event.body);
+      const newLeadRaw = JSON.parse(event.body);
+      
+      // Recupero stato attuale o seed
       let current;
       try {
-        current = await store.get('pipeline', { type: 'json' }) || ACCENTURE_SEED;
+        current = await store.get(STORE_KEY, { type: 'json' });
+        if (!current || !Array.isArray(current)) {
+          current = ACCENTURE_SEED;
+        }
       } catch {
         current = ACCENTURE_SEED;
       }
-      const updated = [{ ...newLead, id: Date.now() }, ...current];
-      await store.setJSON('pipeline', updated);
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(updated) };
+
+      // Evita duplicati basati sul nome (opzionale ma utile)
+      const exists = current.find(l => l.name.toLowerCase() === newLeadRaw.name.toLowerCase());
+      if (exists) {
+        return { statusCode: 200, headers: CORS, body: JSON.stringify(current) };
+      }
+
+      const newLead = { ...newLeadRaw, id: Date.now() };
+      const updated = [newLead, ...current];
+      
+      await store.setJSON(STORE_KEY, updated);
+      
+      return { 
+        statusCode: 200, 
+        headers: CORS, 
+        body: JSON.stringify(updated) 
+      };
     } catch (err) {
-      return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err.message }) };
+      console.error("Errore salvataggio Blobs:", err);
+      return { 
+        statusCode: 500, 
+        headers: CORS, 
+        body: JSON.stringify({ error: err.message }) 
+      };
     }
   }
 
