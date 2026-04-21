@@ -245,33 +245,7 @@ function MiniBars({ breakdown, height = 28 }) {
   );
 }
 
-function SettingsModal({ settings, onSave, onClose }) {
-  const [key, setKey] = useState(settings.apiKey || '');
-  const [model, setModel] = useState(settings.model || 'gemini-2.5-flash');
-  return (
-    <div className="modal-overlay">
-      <div className="modal-content">
-        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>Impostazioni Agente Gemini</h3>
-        <div style={{ marginBottom: 20 }}>
-          <label className="filter-label">Google API Key (AI Studio)</label>
-          <input type="password" className="input-field" value={key} onChange={e => setKey(e.target.value)} placeholder="AIzaSy..." />
-        </div>
-        <div style={{ marginBottom: 24 }}>
-          <label className="filter-label">Modello Agente</label>
-          <select className="input-field" value={model} onChange={e => setModel(e.target.value)}>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-          </select>
-        </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button onClick={() => onSave({ apiKey: key, model })} style={{ flex: 1, background: T.accent, color: '#fff', padding: '10px', borderRadius: 4, fontWeight: 600 }}>Salva</button>
-          <button onClick={onClose} style={{ flex: 1, background: T.bgCard, color: T.textDim, padding: '10px', borderRadius: 4 }}>Chiudi</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+
 
 // ============ SEED ============
 const ACCENTURE_LEAD = {
@@ -347,7 +321,7 @@ function PipelinePage({ pipeline, newestId }) {
   );
 }
 
-function ScoringPage({ settings, onSave, onOpenSettings }) {
+function ScoringPage({ onSave }) {
   const [state, setState] = useState('IDLE'); // IDLE, EVALUATING, RESULT
   const [name, setName] = useState('');
   const [result, setResult] = useState(null);
@@ -358,12 +332,10 @@ function ScoringPage({ settings, onSave, onOpenSettings }) {
 
   const handleEvaluate = async () => {
     if (!name) return;
-    const onNetlify = window.location.hostname !== 'localhost' && window.location.hostname !== '' && !window.location.protocol.startsWith('file');
-    if (!settings.apiKey && !onNetlify) { onOpenSettings(); return; }
     setState('EVALUATING'); setLogs([]);
     messages.current = [{ role: "system", content: GEMINI_SYSTEM_PROMPT }, { role: "user", content: `Analizza l'azienda: ${name}. Sii meticoloso e usa Google per recuperare info recenti e valide.` }];
     try {
-      const data = await callGemini_Agent(settings.apiKey, settings.model, messages.current, addLog);
+      const data = await callGemini_Agent(null, 'gemini-2.5-flash', messages.current, addLog);
       setResult({ ...data, name }); setState('RESULT');
     } catch (err) { addLog("ERRORE: " + err.message); setState('IDLE'); }
   };
@@ -373,7 +345,6 @@ function ScoringPage({ settings, onSave, onOpenSettings }) {
       <div style={{ maxWidth: 640, margin: '60px auto', textAlign: 'center' }}>
         <h2 style={{ fontSize: 24, fontWeight: 600, marginBottom: 12 }}>Valuta Lead con Agente Autonomo</h2>
         <p style={{ color: T.textDim, marginBottom: 32 }}>L'agente cercherà attivamente informazioni su Google per garantire la massima precisione.</p>
-        {!settings.apiKey && <div style={{ marginBottom: 16, padding: '10px 14px', background: '#FFF8E1', border: '1px solid #FFD54F', borderRadius: 4, fontSize: 12, color: '#7B5800' }}>⚠️ API Key Gemini non configurata. Clicca ⚙️ in alto a destra per inserirla.</div>}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}><input className="input-field" style={{ fontSize: 16, padding: '14px' }} placeholder="Nome Azienda..." value={name} onChange={e => setName(e.target.value)} disabled={state === 'EVALUATING'} /><button onClick={handleEvaluate} disabled={!name || state === 'EVALUATING'} style={{ background: T.accent, color: '#fff', padding: '0 32px', borderRadius: 4, fontWeight: 600 }}>Avvia Ricerca Agentica</button></div>
         {(state === 'EVALUATING' || logs.length > 0) && <div style={{ textAlign: 'left', background: '#1A1F2A', padding: '24px', borderRadius: 4, border: '1px solid #333' }}>{state === 'EVALUATING' && <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}><div className="loader" style={{ borderColor: 'rgba(124, 203, 146, 0.2)', borderTopColor: '#7CCB92' }}></div><span style={{ color: '#7CCB92', fontWeight: 600 }}>Agente in azione...</span></div>}{logs.map(l => <div key={l.id} className={l.type === 'step' ? 'ai-step' : 'ai-log'}>{l.type === 'step' ? '' : '> '}{l.msg}</div>)}</div>}
       </div>
@@ -421,45 +392,56 @@ function StatChip({ label, value, color }) {
 // ============ APP ============
 function App() {
   const [activeTab, setActiveTab] = useState('pipeline');
-  const [pipeline, setPipeline] = useState(() => {
-    try {
-      const saved = localStorage.getItem('railconnect_pipeline');
-      return saved ? JSON.parse(saved) : [ACCENTURE_LEAD];
-    } catch { return [ACCENTURE_LEAD]; }
-  });
+  const [pipeline, setPipeline] = useState([ACCENTURE_LEAD]);
   const [newestId, setNewestId] = useState(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('gemini_settings')) || { apiKey: '', model: 'gemini-2.5-flash' });
+  const [loadingLeads, setLoadingLeads] = useState(true);
 
+  const isNetlify = window.location.hostname !== 'localhost' && window.location.hostname !== '' && !window.location.protocol.startsWith('file');
+
+  // Load leads on mount
   useEffect(() => {
-    localStorage.setItem('railconnect_pipeline', JSON.stringify(pipeline));
-  }, [pipeline]);
+    if (isNetlify) {
+      fetch('/.netlify/functions/leads')
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setPipeline(data); })
+        .catch(() => {})
+        .finally(() => setLoadingLeads(false));
+    } else {
+      try {
+        const saved = localStorage.getItem('railconnect_pipeline');
+        if (saved) setPipeline(JSON.parse(saved));
+      } catch {}
+      setLoadingLeads(false);
+    }
+  }, []);
 
-  const handleSaveSettings = (s) => { setSettings(s); localStorage.setItem('gemini_settings', JSON.stringify(s)); setIsSettingsOpen(false); };
-  const handleSave = (l) => { const f = { ...l, id: Date.now() }; setPipeline(p => [f, ...p]); setNewestId(f.id); setActiveTab('pipeline'); setTimeout(() => setNewestId(null), 1500); };
+  // Persist locally when not on Netlify
+  useEffect(() => {
+    if (!isNetlify && !loadingLeads) {
+      localStorage.setItem('railconnect_pipeline', JSON.stringify(pipeline));
+    }
+  }, [pipeline, loadingLeads]);
 
-  const handleExportHTML = () => {
-    try {
-      const seedJson = JSON.stringify(pipeline, null, 2);
-      const scriptTag = document.querySelector('script[type="text/babel"]');
-      const scriptContent = scriptTag.textContent
-        .replace(/const ACCENTURE_LEAD\s*=\s*\{[\s\S]*?\};/, `const SEED_DATA = ${seedJson};`)
-        .replace(/\[ACCENTURE_LEAD\]/g, 'SEED_DATA')
-        .replace(/return \[ACCENTURE_LEAD\];/g, 'return SEED_DATA;')
-        .replace(/\? \[ACCENTURE_LEAD\]/g, '? SEED_DATA');
-      const extScripts = Array.from(document.querySelectorAll('body > script[src]'))
-        .map(s => '  <scr' + 'ipt src="' + s.src + '" crossorigin></scr' + 'ipt>')
-        .join('\n');
-      const babelScript = '  <scr' + 'ipt type="text/babel" data-presets="react">' + scriptContent + '</scr' + 'ipt>';
-      const head = document.head.outerHTML;
-      const finalHtml = '<!doctype html>\n<html lang="it">\n' + head + '\n<body>\n  <div id="root"></div>\n' + extScripts + '\n' + babelScript + '\n</body>\n</html>';
-      const blob = new Blob([finalHtml], { type: 'text/html;charset=utf-8' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'railconnect-leads-' + new Date().toISOString().slice(0,10) + '.html';
-      a.click();
-      URL.revokeObjectURL(a.href);
-    } catch(e) { alert('Errore export: ' + e.message); }
+  const handleSave = async (l) => {
+    const newLead = { ...l, id: Date.now() };
+    if (isNetlify) {
+      try {
+        const res = await fetch('/.netlify/functions/leads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newLead),
+        });
+        const updated = await res.json();
+        if (Array.isArray(updated)) setPipeline(updated);
+      } catch {
+        setPipeline(p => [newLead, ...p]);
+      }
+    } else {
+      setPipeline(p => [newLead, ...p]);
+    }
+    setNewestId(newLead.id);
+    setActiveTab('pipeline');
+    setTimeout(() => setNewestId(null), 1500);
   };
 
   const stats = useMemo(() => {
