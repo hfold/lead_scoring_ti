@@ -336,8 +336,21 @@ const ACCENTURE_LEAD = {
   ]
 };
 
+// ============ HELPERS ============
+const ANALYSIS_KEYWORDS = { 'Sector': 'SETTORE', 'Size': 'DIMENSIONE', 'HSR': 'VICINANZA', 'Growth': 'CRESCITA', 'Travel Mgr': 'TRAVEL' };
+
+function getAnalysisText(lead, label) {
+  if (lead.analysis?.[label]) return lead.analysis[label];
+  if (lead.analysis_summary) {
+    const kw = ANALYSIS_KEYWORDS[label];
+    const line = lead.analysis_summary.split('\n').find(l => l.toUpperCase().includes(kw));
+    if (line) return line.replace(/^[•\-\*]\s*[A-ZÀÈÌÒÙ\s]+:\s*/i, '').trim();
+  }
+  return "Dato non disponibile.";
+}
+
 // ============ PIPELINE ROW ============
-function PipelineRow({ lead, isNew }) {
+function PipelineRow({ lead, isNew, onDelete }) {
   const [hover, setHover] = useState(false);
   const { total, breakdown } = useMemo(() => computeScoreInfo(lead), [lead]);
   const tier = classify(total);
@@ -369,7 +382,7 @@ function PipelineRow({ lead, isNew }) {
                      <span style={{ fontFamily: T.mono, fontWeight: 600, color: b.value > 0 ? T.accent : T.textMuted }}>SCORE: {b.value}/{b.max}</span>
                   </div>
                   <div style={{ fontSize: 13, color: T.text, lineHeight: 1.5 }}>
-                    {lead.analysis?.[b.label] || "Dato non disponibile."}
+                    {getAnalysisText(lead, b.label)}
                   </div>
                 </div>
               </div>
@@ -400,13 +413,16 @@ function PipelineRow({ lead, isNew }) {
              Fonti: {lead.data_sources}
            </div>
          )}
+         <div style={{ marginTop: 12, textAlign: 'right' }}>
+           <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`Eliminare "${lead.name}" dal database?`)) onDelete(lead.id); }} style={{ fontSize: 11, color: '#e57373', background: 'transparent', border: '1px solid #e57373', borderRadius: 3, padding: '4px 10px', cursor: 'pointer' }}>🗑 Elimina lead</button>
+         </div>
       </div>
     </div>
   );
 }
 
 // ============ PAGES ============
-function PipelinePage({ pipeline, newestId }) {
+function PipelinePage({ pipeline, newestId, onDelete }) {
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('All');
   const [scoreRange, setScoreRange] = useState([0, 100]);
@@ -452,7 +468,7 @@ function PipelinePage({ pipeline, newestId }) {
           </div>
         </div>
       </div>
-      <div style={{ display: 'grid', gap: 10 }}>{filtered.map(l => <PipelineRow key={l.id} lead={l} isNew={l.id === newestId} />)}</div>
+      <div style={{ display: 'grid', gap: 10 }}>{filtered.map(l => <PipelineRow key={l.id} lead={l} isNew={l.id === newestId} onDelete={onDelete} />)}</div>
     </div>
   );
 }
@@ -674,18 +690,27 @@ function App() {
         } else {
           alert("Ops! Errore di salvataggio remoto: " + JSON.stringify(updated));
           console.error("Risposta inattesa:", updated);
-          setPipeline(p => [newLead, ...p]); // Fallback UI
+          setPipeline(p => { const exists = p.find(x => x.name.toLowerCase() === newLead.name.toLowerCase()); return exists ? p.map(x => x.name.toLowerCase() === newLead.name.toLowerCase() ? newLead : x) : [newLead, ...p]; });
         }
       } catch (e) {
         alert("Ops! Errore di rete: " + e.message);
-        setPipeline(p => [newLead, ...p]);
+        setPipeline(p => { const exists = p.find(x => x.name.toLowerCase() === newLead.name.toLowerCase()); return exists ? p.map(x => x.name.toLowerCase() === newLead.name.toLowerCase() ? newLead : x) : [newLead, ...p]; });
       }
     } else {
-      setPipeline(p => [newLead, ...p]);
+      setPipeline(p => { const exists = p.find(x => x.name.toLowerCase() === newLead.name.toLowerCase()); return exists ? p.map(x => x.name.toLowerCase() === newLead.name.toLowerCase() ? newLead : x) : [newLead, ...p]; });
     }
     setNewestId(newLead.id);
     setActiveTab('pipeline');
     setTimeout(() => setNewestId(null), 1500);
+  };
+
+  const handleDelete = async (id) => {
+    if (isNetlify) {
+      try {
+        await fetch(`/.netlify/functions/leads?id=${id}`, { method: 'DELETE' });
+      } catch {}
+    }
+    setPipeline(p => p.filter(l => l.id !== id));
   };
 
   const stats = useMemo(() => {
@@ -704,7 +729,7 @@ function App() {
         </div>
         <div style={{ display: 'flex', padding: '0 24px' }}><button style={tabStyle(activeTab === 'pipeline')} onClick={() => setActiveTab('pipeline')}>Lead con Score</button><button style={tabStyle(activeTab === 'scoring')} onClick={() => setActiveTab('scoring')}>Valuta Nuovo Lead</button></div>
       </header>
-      <main style={{ minHeight: 'calc(100vh - 150px)' }}>{activeTab === 'pipeline' ? <PipelinePage pipeline={pipeline} newestId={newestId} /> : <ScoringPage onSave={handleSave} />}</main>
+      <main style={{ minHeight: 'calc(100vh - 150px)' }}>{activeTab === 'pipeline' ? <PipelinePage pipeline={pipeline} newestId={newestId} onDelete={handleDelete} /> : <ScoringPage onSave={handleSave} />}</main>
       <footer style={{ padding: '24px 32px', borderTop: `1px solid ${T.line}`, background: '#fff', fontSize: 10, color: T.textMuted, fontFamily: T.mono, display: 'flex', justifyContent: 'space-between' }}><div>RAILCONNECT B2B · GEMINI 2.5 GOOGLE SEARCH AGENT</div><div>V3.5 · ACCENTURE PROJECT</div></footer>
     </div>
   );

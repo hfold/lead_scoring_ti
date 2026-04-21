@@ -63,18 +63,34 @@ exports.handler = async (event) => {
         current = ACCENTURE_SEED;
       }
 
-      const exists = current.find(l => l.name.toLowerCase() === newLeadRaw.name.toLowerCase());
-      if (exists) {
-        return { statusCode: 200, headers: CORS, body: JSON.stringify(current) };
-      }
-
       const newLead = { ...newLeadRaw, id: Date.now() };
-      const updated = [newLead, ...current];
+      const exists = current.find(l => l.name.toLowerCase() === newLeadRaw.name.toLowerCase());
+      const updated = exists
+        ? current.map(l => l.name.toLowerCase() === newLeadRaw.name.toLowerCase() ? newLead : l)
+        : [newLead, ...current];
       await store.setJSON(STORE_KEY, updated);
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify(updated) };
     } catch (err) {
       console.error("Errore salvataggio:", err);
+      return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err.message }) };
+    }
+  }
+
+  // DELETE: remove a lead by id
+  if (event.httpMethod === 'DELETE') {
+    try {
+      const id = event.queryStringParameters?.id;
+      if (!id) return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'Missing id' }) };
+      let current;
+      try {
+        current = await store.get(STORE_KEY, { type: 'json' });
+        if (!current || !Array.isArray(current)) current = ACCENTURE_SEED;
+      } catch { current = ACCENTURE_SEED; }
+      const updated = current.filter(l => String(l.id) !== String(id));
+      await store.setJSON(STORE_KEY, updated);
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(updated) };
+    } catch (err) {
       return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err.message }) };
     }
   }
