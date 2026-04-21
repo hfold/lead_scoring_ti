@@ -240,14 +240,15 @@ function ArcGauge({ score, size = 180, stroke = 18, color }) {
 
 function MiniBars({ breakdown, height = 28 }) {
   return (
-    <svg width={70} height={height} style={{ display: 'block' }}>
+    <svg width={110} height={height} style={{ display: 'block' }}>
       {breakdown.map((b, i) => {
         const pct = b.max > 0 ? b.value / b.max : 0;
         const h = Math.max(2, pct * height);
+        // Distribuito su 110px per allinearsi a "SET · DIM · AV · CRE · RV"
         return (
-          <g key={b.label} transform={`translate(${i * 14}, 0)`}>
-            <rect x={0} y={0} width={10} height={height} fill={T.line} rx={1} />
-            <rect x={0} y={height - h} width={10} height={h} fill={pct > 0.7 ? T.accent : pct > 0.4 ? T.warm : T.textMuted} rx={1} />
+          <g key={b.label} transform={`translate(${i * 22}, 0)`}>
+            <rect x={0} y={0} width={12} height={height} fill={T.line} rx={1} />
+            <rect x={0} y={height - h} width={12} height={h} fill={pct > 0.7 ? T.accent : pct > 0.4 ? T.warm : T.textMuted} rx={1} />
           </g>
         );
       })}
@@ -289,9 +290,9 @@ function PipelineRow({ lead, isNew }) {
           </div>
           <div style={{ fontSize: 15, fontWeight: 500, color: T.text }}>{lead.name}</div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
           <MiniBars breakdown={breakdown} height={30} />
-          <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.mono }}>SET · DIM · AV · CRE · RV</span>
+          <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.mono, letterSpacing: 0.5, marginLeft: -4 }}>SET · DIM · AV · CRE · RV</span>
         </div>
         <TierBadge score={total} />
       </div>
@@ -324,10 +325,12 @@ function PipelineRow({ lead, isNew }) {
             })}
          </div>
 
-         <div style={{ marginTop: 12, padding: '10px', background: '#F4F2EC', borderRadius: 4, display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span style={{ fontSize: 14 }}>📍</span>
-            <div style={{ fontSize: 11, color: T.textDim }}><strong>Logistica AV:</strong> {lead.hsr_offices || 'Dato non disponibile'}</div>
-         </div>
+         {lead.hsr_offices && (
+           <div style={{ marginTop: 12, padding: '10px', border: `1px solid ${T.line}`, borderRadius: 4, display: 'flex', gap: 12, alignItems: 'center' }}>
+              <span style={{ fontSize: 14 }}>📍</span>
+              <div style={{ fontSize: 11, color: T.textDim }}><strong>Logistica AV:</strong> {lead.hsr_offices}</div>
+           </div>
+         )}
 
          {lead.data_sources && (
            <div style={{ marginTop: 12, fontSize: 9, color: T.textMuted, fontFamily: T.mono, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -342,16 +345,48 @@ function PipelineRow({ lead, isNew }) {
 // ============ PAGES ============
 function PipelinePage({ pipeline, newestId }) {
   const [search, setSearch] = useState('');
+  const [sectorFilter, setSectorFilter] = useState('All');
   const [scoreRange, setScoreRange] = useState([0, 100]);
-  const filtered = useMemo(() => pipeline.map(l => ({ ...l, _score: computeScore(l) })).filter(l => l.name.toLowerCase().includes(search.toLowerCase()) && l._score >= scoreRange[0] && l._score <= scoreRange[1]).sort((a,b) => b._score - a._score), [pipeline, search, scoreRange]);
+  
+  const filtered = useMemo(() => {
+    return pipeline
+      .map(l => ({ ...l, _score: computeScore(l) }))
+      .filter(l => {
+        const matchesName = l.name.toLowerCase().includes(search.toLowerCase());
+        const matchesSector = sectorFilter === 'All' || l.sector === sectorFilter;
+        const matchesScore = l._score >= scoreRange[0] && l._score <= scoreRange[1];
+        return matchesName && matchesSector && matchesScore;
+      })
+      .sort((a,b) => b._score - a._score);
+  }, [pipeline, search, sectorFilter, scoreRange]);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px' }}>
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, padding: '20px', background: T.bgElev, border: `1px solid ${T.line}`, borderRadius: 8, alignItems: 'flex-end' }}>
-        <div style={{ flex: 1 }}><label className="filter-label">Cerca Azienda</label><input className="input-field" placeholder="Nome..." value={search} onChange={e => setSearch(e.target.value)} /></div>
-        <div style={{ minWidth: 240 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}><label className="filter-label">Range Score</label><span style={{ fontSize: 11, fontFamily: T.mono }}>{scoreRange[0]} - {scoreRange[1]}</span></div>
-          <div style={{ display: 'flex', gap: 10 }}><input type="range" min="0" max="100" value={scoreRange[0]} onChange={e => setScoreRange([Math.min(parseInt(e.target.value), scoreRange[1]), scoreRange[1]])} /><input type="range" min="0" max="100" value={scoreRange[1]} onChange={e => setScoreRange([scoreRange[0], Math.max(parseInt(e.target.value), scoreRange[0])])} /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px 240px', gap: 16, marginBottom: 24, padding: '20px', background: T.bgElev, border: `1px solid ${T.line}`, borderRadius: 8, alignItems: 'flex-end' }}>
+        <div>
+          <label className="filter-label">Cerca Azienda</label>
+          <input className="input-field" placeholder="Nome..." value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        
+        <div>
+          <label className="filter-label">Settore</label>
+          <select className="input-field" value={sectorFilter} onChange={e => setSectorFilter(e.target.value)}>
+            <option value="All">Tutti i settori</option>
+            {Object.entries(SECTOR_LABELS).map(([val, label]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <label className="filter-label">Range Score</label>
+            <span style={{ fontSize: 11, fontFamily: T.mono }}>{scoreRange[0]} - {scoreRange[1]}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input type="range" min="0" max="100" value={scoreRange[0]} onChange={e => setScoreRange([Math.min(parseInt(e.target.value), scoreRange[1]), scoreRange[1]])} />
+            <input type="range" min="0" max="100" value={scoreRange[1]} onChange={e => setScoreRange([scoreRange[0], Math.max(parseInt(e.target.value), scoreRange[0])])} />
+          </div>
         </div>
       </div>
       <div style={{ display: 'grid', gap: 10 }}>{filtered.map(l => <PipelineRow key={l.id} lead={l} isNew={l.id === newestId} />)}</div>
