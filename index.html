@@ -239,20 +239,23 @@ function ArcGauge({ score, size = 180, stroke = 18, color }) {
 }
 
 function MiniBars({ breakdown, height = 28 }) {
+  const shortLabels = ['SET', 'DIM', 'AV', 'CRE', 'RV'];
   return (
-    <svg width={110} height={height} style={{ display: 'block' }}>
+    <div style={{ display: 'flex', gap: 8 }}>
       {breakdown.map((b, i) => {
         const pct = b.max > 0 ? b.value / b.max : 0;
         const h = Math.max(2, pct * height);
-        // Distribuito su 110px per allinearsi a "SET · DIM · AV · CRE · RV"
+        const color = pct > 0.7 ? T.accent : pct > 0.4 ? T.warm : T.textMuted;
         return (
-          <g key={b.label} transform={`translate(${i * 22}, 0)`}>
-            <rect x={0} y={0} width={12} height={height} fill={T.line} rx={1} />
-            <rect x={0} y={height - h} width={12} height={h} fill={pct > 0.7 ? T.accent : pct > 0.4 ? T.warm : T.textMuted} rx={1} />
-          </g>
+          <div key={b.label} title={`${BREAKDOWN_LABELS[b.label]}: ${b.value} / ${b.max}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'help' }}>
+            <div style={{ width: 14, height, background: T.line, borderRadius: 2, position: 'relative' }}>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: h, background: color, borderRadius: 2 }} />
+            </div>
+            <div style={{ fontSize: 9, fontFamily: T.mono, color: T.textMuted, letterSpacing: 0.5 }}>{shortLabels[i]}</div>
+          </div>
         );
       })}
-    </svg>
+    </div>
   );
 }
 
@@ -291,8 +294,7 @@ function PipelineRow({ lead, isNew }) {
           <div style={{ fontSize: 15, fontWeight: 500, color: T.text }}>{lead.name}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          <MiniBars breakdown={breakdown} height={30} />
-          <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.mono, letterSpacing: 0.5, marginLeft: -4 }}>SET · DIM · AV · CRE · RV</span>
+          <MiniBars breakdown={breakdown} height={24} />
         </div>
         <TierBadge score={total} />
       </div>
@@ -324,13 +326,6 @@ function PipelineRow({ lead, isNew }) {
               );
             })}
          </div>
-
-         {lead.hsr_offices && (
-           <div style={{ marginTop: 12, padding: '10px', border: `1px solid ${T.line}`, borderRadius: 4, display: 'flex', gap: 12, alignItems: 'center' }}>
-              <span style={{ fontSize: 14 }}>📍</span>
-              <div style={{ fontSize: 11, color: T.textDim }}><strong>Logistica AV:</strong> {lead.hsr_offices}</div>
-           </div>
-         )}
 
          {lead.data_sources && (
            <div style={{ marginTop: 12, fontSize: 9, color: T.textMuted, fontFamily: T.mono, textTransform: 'uppercase', letterSpacing: 0.5 }}>
