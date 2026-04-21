@@ -107,7 +107,7 @@ STRATEGIA AGENTICA:
 - Sii estremamente preciso cercando fonti ufficiali tramite Google.
 - Una volta raccolti dati sufficienti, restituisci ESCLUSIVAMENTE un JSON valido. Non usare formattazioni come Markdown. Evita ASSOLUTAMENTE l'uso di doppi apici (") all'interno dei testi per non invalidare il JSON.
 
-FORMATO JSON FINALE (IMPORTANTE: mantieni i prefissi delle icone in analysis_summary):
+FORMATO JSON FINALE:
 {
   "sector": "...",
   "employees": 123,
@@ -115,7 +115,13 @@ FORMATO JSON FINALE (IMPORTANTE: mantieni i prefissi delle icone in analysis_sum
   "growth": ["Hiring"],
   "travelMgr": true,
   "city": "...",
-  "analysis_summary": "🚀 CRESCITA: ...\n📍 LOGISTICA: ...\n👔 GOVERNANCE: ...\n💡 INSIGHT: ...",
+  "analysis": {
+    "Sector": "Spiegazione sul settore...",
+    "Size": "Spiegazione sulla dimensione...",
+    "HSR": "Spiegazione sull'alta velocità e logistica...",
+    "Growth": "Spiegazione su news e crescita...",
+    "Travel Mgr": "Spiegazione sulla travel governance..."
+  },
   "hsr_offices": "es. 3 sedi: Milano (Centrale AV ✓), Roma (Termini AV ✓), Catania (no AV ✗)",
   "data_sources": "Lista sintetica delle fonti trovate"
 }`;
@@ -193,7 +199,7 @@ async function callGemini_Agent(apiKey, model, messages, onLog) {
 
 function parseResult(content) {
   try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const jsonMatch = content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (!jsonMatch) throw new Error("Nessun JSON trovato nella risposta.");
     
     // Rimuovi eventuali trailing comma prima della chiusura (spesso errore tipico delle AI)
@@ -203,7 +209,9 @@ function parseResult(content) {
     return JSON.parse(jsonStr);
   } catch (err) {
     console.error("Grezzo ricevuto:", content);
-    throw new Error(`Si è verificato un errore di parsing JSON. ${err.message}`);
+    const customErr = new Error(`Errore parsing JSON: ${err.message}`);
+    customErr.rawContent = content;
+    throw customErr;
   }
 }
 
@@ -297,7 +305,13 @@ const ACCENTURE_LEAD = {
   growth: ['Hiring'],
   travelMgr: true,
   hsr_offices: '9/12 sedi vicine ad AV: Milano, Roma, Torino, Firenze, Bologna, Napoli, Verona, Padova, Modena/Reggio Emilia ✓ — Cagliari, Cosenza, Misterbianco ✗',
-  analysis_summary: '• SETTORE: Accenture è la principale società di consulenza e servizi IT globale, operante in Italia con forte presenza nelle aziende enterprise.\n• DIMENSIONE: ~20.000 dipendenti in Italia (750.000 globali), con sedi nelle principali città.\n• VICINANZA AV: 9 sedi su 12 vicine a stazioni AV (Milano Centrale, Roma Termini, Torino Porta Nuova, Firenze SMN, Bologna Centrale, Napoli Centrale, Verona Porta Nuova, Padova, Reggio Emilia Mediopadana). Cagliari, Cosenza e Misterbianco non servite da AV.\n• CRESCITA: Assunzioni attive in Italia (Stage, Software Engineer, AI specialist). Investimenti strategici in AI, digitale e cloud. Alcuni tagli globali nel 2023 ma crescita nei settori chiave.\n• TRAVEL MANAGER: Global travel and events senior director con responsabili per area geografica. Politiche di viaggio strutturate con carte aziendali e rimborsi. Expertise interna nel settore Travel, Airline & Hospitality.',
+  analysis: {
+    'Sector': "Accenture è la principale società di consulenza e servizi IT globale, operante in Italia con forte presenza nelle aziende enterprise.",
+    'Size': "~20.000 dipendenti in Italia (750.000 globali), con sedi nelle principali città.",
+    'HSR': "9 sedi su 12 vicine a stazioni AV (Milano Centrale, Roma Termini, Torino, Firenze, ecc). Cagliari, Cosenza e Misterbianco non servite da AV.",
+    'Growth': "Assunzioni attive in Italia (Stage, Software Engineer, AI specialist). Investimenti strategici.",
+    'Travel Mgr': "Global travel and events senior director con responsabili per area geografica."
+  },
   data_sources: 'Sito ufficiale Accenture.com, LinkedIn Jobs Italia, Il Sole 24 Ore, Bloomberg',
   managers: [
     { name: "Alessia Rossi", role: "Category Manager Corporate Travel Italy", linkedin: "#" }
@@ -327,32 +341,21 @@ function PipelineRow({ lead, isNew }) {
         <TierBadge score={total} />
       </div>
       <div style={{ maxHeight: hover ? 800 : 0, opacity: hover ? 1 : 0, overflow: 'hidden', marginTop: hover ? 14 : 0, paddingTop: hover ? 14 : 0, borderTop: hover ? `1px dashed ${T.line}` : 'none', transition: 'all 300ms ease-in-out' }}>
-         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
+         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {breakdown.map(b => (
-              <div key={b.label}>
-                <div style={{ fontSize: 9, color: T.textMuted, textTransform: 'uppercase' }}>{BREAKDOWN_LABELS[b.label]}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 13 }}>{b.value}<span style={{ fontSize: 10, color: '#aaa' }}>/{b.max}</span></div>
-                <div style={{ height: 3, background: T.line, marginTop: 4 }}><div style={{ height: '100%', background: tier.color, width: `${(b.value/b.max)*100}%` }} /></div>
-              </div>
-            ))}
-         </div>
-         
-         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {lead.analysis_summary && lead.analysis_summary.split('\n').filter(l => l.trim()).map((line, i) => {
-              const [header, ...rest] = line.split(':');
-              const iconMatch = header.match(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}]/u);
-              const icon = iconMatch ? iconMatch[0] : '•';
-              const title = header.replace(icon, '').replace(':', '').trim();
-              return (
-                <div key={i} className="insight-card">
-                  <div className="insight-icon">{icon}</div>
-                  <div className="insight-content">
-                    <div className="insight-title">{title}</div>
-                    <div className="insight-text">{rest.join(':').trim()}</div>
+              <div key={b.label} style={{ background: '#fff', border: `1px solid ${T.line}`, borderRadius: 4, padding: 16, display: 'flex', gap: 12 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.text, marginTop: 6, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 10, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+                     <span>{BREAKDOWN_LABELS[b.label]}</span>
+                     <span style={{ fontFamily: T.mono, fontWeight: 600, color: b.value > 0 ? T.accent : T.textMuted }}>SCORE: {b.value}/{b.max}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: T.text, lineHeight: 1.5 }}>
+                    {lead.analysis?.[b.label] || "Dato non disponibile."}
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
          </div>
 
          {lead.managers && lead.managers.length > 0 && (
@@ -472,6 +475,9 @@ function ScoringPage({ onSave }) {
       if (linkedinResult.status === 'rejected') {
          addLog(`[LinkedIn] Ricerca contatti fallita. Passo oltre.`, 'log');
          console.warn("LinkedIn parse error:", linkedinResult.reason);
+         if (linkedinResult.reason.rawContent) {
+            addLog(`[LinkedIn DEBUG] Raw from AI:\n${linkedinResult.reason.rawContent}`, 'log');
+         }
       }
 
       setResult({ ...baseData, managers: linkedinData.managers || [], name }); 
@@ -508,7 +514,22 @@ function ScoringPage({ onSave }) {
           </div>
           <div className="card" style={{ background: `${tier.color}08`, borderColor: `${tier.color}44` }}>
              <h3 className="filter-label" style={{ color: tier.color }}>Analisi Strategica e Fonti</h3>
-             <div style={{ fontSize: 14, fontStyle: 'italic' }}>{result.analysis_summary?.split('\n').map((line, i) => <div key={i} style={{ marginBottom: 6 }}>{line}</div>)}</div>
+             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {breakdown.map(b => (
+                  <div key={b.label} style={{ background: '#fff', border: `1px solid ${T.line}`, borderRadius: 4, padding: 16, display: 'flex', gap: 12 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.text, marginTop: 6, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 10, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+                         <span>{BREAKDOWN_LABELS[b.label]}</span>
+                         <span style={{ fontFamily: T.mono, fontWeight: 600, color: b.value > 0 ? T.accent : T.textMuted }}>SCORE: {b.value}/{b.max}</span>
+                      </div>
+                      <div style={{ fontSize: 13, color: T.text, lineHeight: 1.5 }}>
+                        {result.analysis?.[b.label] || "Dato non disponibile."}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+             </div>
              
              {result.managers && result.managers.length > 0 && (
                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${tier.color}44` }}>
