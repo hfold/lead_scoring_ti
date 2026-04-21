@@ -100,7 +100,7 @@ ATTRIBUTI DA TROVARE:
 2. DIMENSIONE: Numero dipendenti globale.
 3. VICINANZA ALTA VELOCITÀ: Cerca quante sedi ha l'azienda in Italia (numero, città). Per ciascuna sede, verifica se esiste una stazione dell'Alta Velocità (Frecciarossa/Italo) entro 1-2 km o nella stessa città. Considera "hsrServed: true" se almeno la sede principale o il 50% delle sedi risulta vicina a stazioni AV.
 4. CRESCITA: News recenti di assunzioni, M&A o nuove sedi.
-5. TRAVEL MANAGER: Esiste una figura o un ufficio viaggi dedicato?
+5. TRAVEL MANAGER: Cerca se esiste una figura dedicata alla gestione viaggi aziendali (Travel Manager, Mobility Manager, Responsabile Viaggi, Corporate Travel Buyer, Head of Travel, Procurement Travel). Cerca sul sito ufficiale, su LinkedIn e sulla stampa. Anche solo trovare un ufficio/dipartimento viaggi o una policy viaggi strutturata è sufficiente per impostare travelMgr: true.
 
 STRATEGIA AGENTICA:
 - Usa i tool di Google Search forniti per accedere in tempo reale a notizie recenti, dati aziendali, organigrammi e rassegna stampa.
@@ -126,21 +126,36 @@ FORMATO JSON FINALE:
   "data_sources": "Lista sintetica delle fonti trovate"
 }`;
 
-const GEMINI_LINKEDIN_PROMPT = `Sei un Agente di Ricerca HR esperto nell'uso di LinkedIn.
-Il tuo obiettivo è individuare figure chiave in Italia (es. Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer) per l'azienda assegnata.
+const GEMINI_LINKEDIN_PROMPT = `Sei un Agente di Ricerca HR esperto nell'uso di LinkedIn e Google.
+Il tuo obiettivo è trovare figure chiave in Italia per la gestione viaggi aziendali (Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer, Head of Travel, Responsabile Viaggi, Category Manager Travel, Procurement Travel) per l'azienda assegnata.
 
-STRATEGIA AGENTICA:
-- Esegui ALMENO DUE ricerche su Google separate per massimizzare i risultati (es: 1. site:it.linkedin.com/in "Travel Manager" "NOME AZIENDA", 2. site:it.linkedin.com/in "Mobility" "NOME AZIENDA").
-- Il tuo scopo è estrarre più di un contatto utile, possibilmente 2 o 3. Assicurati che lavorino per l'azienda target in ITALIA.
-- Recupera nome, cognome, ruolo esatto copiato da LinkedIn.
-- Per il link: estrai ESATTAMENTE l'URL pubblico restituito da Google (es. https://it.linkedin.com/in/mario-rossi-12345). Evita di ricostruire il link inventando gli id finali. Controlla che le directory siano "/in/".
-- Restituisci ESCLUSIVAMENTE un JSON valido, formattato come un array di oggetti chiamato 'managers'. Non usare Markdown o virgolette doppie nei testi liberi.
+STRATEGIA AGENTICA - esegui TUTTE queste ricerche in ordine:
+1. site:linkedin.com/in "travel manager" "NOME AZIENDA"
+2. site:linkedin.com/in "mobility manager" "NOME AZIENDA"
+3. site:linkedin.com/in "corporate travel" "NOME AZIENDA"
+4. site:linkedin.com/in "responsabile viaggi" "NOME AZIENDA"
+5. "NOME AZIENDA" "travel manager" OR "mobility manager" OR "responsabile viaggi" site:linkedin.com italy
+6. "NOME AZIENDA" travel manager italia linkedin (ricerca libera senza site:)
+
+REGOLE DI SELEZIONE:
+- Includi in "managers" tutti i profili che lavorano o hanno lavorato di recente (<2 anni) per l'azienda in Italia con ruolo pertinente.
+- Se non sei CERTO che la persona sia in Italia, metti comunque il profilo ma indica la città/paese nel ruolo.
+- Preferisci profili attuali (Current position), ma includi anche recenti se non trovi altri.
+- Recupera nome, cognome, ruolo ESATTO da LinkedIn.
+- Per il link: usa l'URL ESATTO restituito da Google (es. https://www.linkedin.com/in/mario-rossi-1a2b3c). NON inventare o ricostruire URL.
+- Includi in "discarded" i profili trovati ma esclusi, con il motivo (es. "Lavora in UK", "Ruolo non pertinente: IT Manager", "Profilo non aggiornato dal 2020").
+- Se non trovi nessun profilo valido, "managers" sarà array vuoto ma "discarded" deve contenere tutto ciò che hai trovato e perché l'hai scartato.
+- Restituisci ESCLUSIVAMENTE un JSON valido. Niente Markdown, niente virgolette doppie nei testi liberi.
 
 FORMATO JSON FINALE:
 {
   "managers": [
     { "name": "Mario Rossi", "role": "Travel Manager Italy", "linkedin": "https://www.linkedin.com/in/mariorossi-1a2b3c" },
-    { "name": "Giulia Bianchi", "role": "Fleet Manager", "linkedin": "https://it.linkedin.com/in/giuliabianchi" }
+    { "name": "Giulia Bianchi", "role": "Corporate Travel Buyer", "linkedin": "https://it.linkedin.com/in/giuliabianchi" }
+  ],
+  "discarded": [
+    { "name": "John Smith", "role": "Travel Manager EMEA", "linkedin": "https://www.linkedin.com/in/johnsmith", "reason": "Basato a Londra, non Italia" },
+    { "name": "Anna Verdi", "role": "Fleet Manager", "linkedin": "https://www.linkedin.com/in/annaverdi", "reason": "Profilo non aggiornato, ultima posizione 2021" }
   ]
 }`;
 
@@ -473,7 +488,7 @@ function ScoringPage({ onSave }) {
       }
 
       const baseData = baseResult.value;
-      const linkedinData = linkedinResult.status === 'fulfilled' ? linkedinResult.value : { managers: [] };
+      const linkedinData = linkedinResult.status === 'fulfilled' ? linkedinResult.value : { managers: [], discarded: [] };
 
       if (linkedinResult.status === 'rejected') {
          addLog(`[LinkedIn] Ricerca contatti fallita. Passo oltre.`, 'log');
@@ -483,7 +498,7 @@ function ScoringPage({ onSave }) {
          }
       }
 
-      setResult({ ...baseData, managers: linkedinData.managers || [], name }); 
+      setResult({ ...baseData, managers: linkedinData.managers || [], discarded_managers: linkedinData.discarded || [], name });
       setState('RESULT');
     } catch (err) { addLog("ERRORE CRITICO: " + err.message); setState('IDLE'); }
   };
@@ -536,15 +551,49 @@ function ScoringPage({ onSave }) {
              
              {result.managers && result.managers.length > 0 && (
                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${tier.color}44` }}>
-                  <h3 className="filter-label" style={{ color: tier.color }}>Referenti Travel (LinkedIn)</h3>
+                  <h3 className="filter-label" style={{ color: tier.color }}>Referenti Travel trovati (LinkedIn)</h3>
                   <div style={{ display: 'grid', gap: 8 }}>
                     {result.managers.map((m, i) => (
-                      <div key={i} style={{ background: '#fff', border: `1px solid ${tier.color}33`, padding: '8px 12px', borderRadius: 4 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{m.name}</div>
-                        <div style={{ fontSize: 11, color: T.textDim }}>{m.role}</div>
+                      <div key={i} style={{ background: '#fff', border: `1px solid ${tier.color}33`, padding: '8px 12px', borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{m.name}</div>
+                          <div style={{ fontSize: 11, color: T.textDim }}>{m.role}</div>
+                        </div>
+                        {m.linkedin && m.linkedin !== '#' && (
+                          <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 12 }}>LinkedIn ↗</a>
+                        )}
                       </div>
                     ))}
                   </div>
+               </div>
+             )}
+
+             {result.managers && result.managers.length === 0 && (
+               <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${tier.color}44` }}>
+                  <h3 className="filter-label" style={{ color: T.textMuted }}>Referenti Travel: nessuno trovato</h3>
+               </div>
+             )}
+
+             {result.discarded_managers && result.discarded_managers.length > 0 && (
+               <div style={{ marginTop: 8 }}>
+                  <details>
+                    <summary style={{ fontSize: 11, color: T.textMuted, cursor: 'pointer', userSelect: 'none' }}>
+                      ⚠️ {result.discarded_managers.length} profili trovati ma scartati (espandi)
+                    </summary>
+                    <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                      {result.discarded_managers.map((m, i) => (
+                        <div key={i} style={{ background: '#fafafa', border: '1px solid #eee', padding: '6px 10px', borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: T.textDim }}>{m.name} — <span style={{ fontWeight: 400 }}>{m.role}</span></div>
+                            <div style={{ fontSize: 10, color: '#e57373', marginTop: 2 }}>Motivo: {m.reason}</div>
+                          </div>
+                          {m.linkedin && m.linkedin !== '#' && (
+                            <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 10, whiteSpace: 'nowrap', marginLeft: 8 }}>↗</a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                </div>
              )}
 
