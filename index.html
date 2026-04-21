@@ -120,6 +120,21 @@ FORMATO JSON FINALE (IMPORTANTE: mantieni i prefissi delle icone in analysis_sum
   "data_sources": "Lista sintetica delle fonti trovate"
 }`;
 
+const GEMINI_LINKEDIN_PROMPT = `Sei un Agente di Ricerca HR esperto nell'uso di LinkedIn.
+Il tuo obiettivo è individuare figure chiave (Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer) in Italia per l'azienda assegnata.
+
+STRATEGIA AGENTICA:
+- Usa Google Search inserendo diciture come: site:it.linkedin.com/in "Travel Manager" OR "Mobility" "NOME AZIENDA".
+- Recupera nome, cognome, ruolo esatto e il link al profilo LinkedIn.
+- Restituisci ESCLUSIVAMENTE un JSON valido, formattato come un array di oggetti chiamato 'managers'.
+
+FORMATO JSON FINALE:
+{
+  "managers": [
+    { "name": "Mario Rossi", "role": "Travel Manager Italy", "linkedin": "https://it.linkedin.com/in/mariorossi" }
+  ]
+}`;
+
 // ============ AI AGENT SERVICE ============
 async function callGemini_Agent(apiKey, model, messages, onLog) {
   const modelName = model || "gemini-2.5-flash";
@@ -273,7 +288,10 @@ const ACCENTURE_LEAD = {
   travelMgr: true,
   hsr_offices: '9/12 sedi vicine ad AV: Milano, Roma, Torino, Firenze, Bologna, Napoli, Verona, Padova, Modena/Reggio Emilia ✓ — Cagliari, Cosenza, Misterbianco ✗',
   analysis_summary: '• SETTORE: Accenture è la principale società di consulenza e servizi IT globale, operante in Italia con forte presenza nelle aziende enterprise.\n• DIMENSIONE: ~20.000 dipendenti in Italia (750.000 globali), con sedi nelle principali città.\n• VICINANZA AV: 9 sedi su 12 vicine a stazioni AV (Milano Centrale, Roma Termini, Torino Porta Nuova, Firenze SMN, Bologna Centrale, Napoli Centrale, Verona Porta Nuova, Padova, Reggio Emilia Mediopadana). Cagliari, Cosenza e Misterbianco non servite da AV.\n• CRESCITA: Assunzioni attive in Italia (Stage, Software Engineer, AI specialist). Investimenti strategici in AI, digitale e cloud. Alcuni tagli globali nel 2023 ma crescita nei settori chiave.\n• TRAVEL MANAGER: Global travel and events senior director con responsabili per area geografica. Politiche di viaggio strutturate con carte aziendali e rimborsi. Expertise interna nel settore Travel, Airline & Hospitality.',
-  data_sources: 'Sito ufficiale Accenture.com, LinkedIn Jobs Italia, Il Sole 24 Ore, Bloomberg'
+  data_sources: 'Sito ufficiale Accenture.com, LinkedIn Jobs Italia, Il Sole 24 Ore, Bloomberg',
+  managers: [
+    { name: "Alessia Rossi", role: "Category Manager Corporate Travel Italy", linkedin: "#" }
+  ]
 };
 
 // ============ PIPELINE ROW ============
@@ -326,6 +344,25 @@ function PipelineRow({ lead, isNew }) {
               );
             })}
          </div>
+
+         {lead.managers && lead.managers.length > 0 && (
+           <div style={{ marginTop: 12, padding: '12px', background: '#FFFFFF', border: `1px solid ${T.line}`, borderRadius: 4 }}>
+              <div style={{ fontSize: 10, color: T.textMuted, fontFamily: T.mono, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>👔 Contatti Chiave LinkedIn</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {lead.managers.map((m, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                     <div>
+                       <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{m.name}</div>
+                       <div style={{ fontSize: 11, color: T.textDim }}>{m.role}</div>
+                     </div>
+                     {m.linkedin && m.linkedin !== '#' && (
+                       <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>LinkedIn ↗</a>
+                     )}
+                  </div>
+                ))}
+              </div>
+           </div>
+         )}
 
          {lead.data_sources && (
            <div style={{ marginTop: 12, fontSize: 9, color: T.textMuted, fontFamily: T.mono, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -402,9 +439,18 @@ function ScoringPage({ onSave }) {
     if (!name) return;
     setState('EVALUATING'); setLogs([]);
     messages.current = [{ role: "system", content: GEMINI_SYSTEM_PROMPT }, { role: "user", content: `Analizza l'azienda: ${name}. Sii meticoloso e usa Google per recuperare info recenti e valide.` }];
+    const linkedinMessages = [{ role: "system", content: GEMINI_LINKEDIN_PROMPT }, { role: "user", content: `Trova i responsabili Travel/Mobility su LinkedIn Italia per l'azienda: ${name}.` }];
+
     try {
-      const data = await callGemini_Agent(null, 'gemini-2.5-flash', messages.current, addLog);
-      setResult({ ...data, name }); setState('RESULT');
+      addLog(`Avvio ricerca parallela (Analisi + LinkedIn) su ${name}...`, 'step');
+      
+      const [baseData, linkedinData] = await Promise.all([
+        callGemini_Agent(null, 'gemini-2.5-flash', messages.current, msg => addLog(`[Analisi] ${msg}`)),
+        callGemini_Agent(null, 'gemini-2.5-flash', linkedinMessages, msg => addLog(`[LinkedIn] ${msg}`))
+      ]);
+
+      setResult({ ...baseData, managers: linkedinData.managers || [], name }); 
+      setState('RESULT');
     } catch (err) { addLog("ERRORE: " + err.message); setState('IDLE'); }
   };
 
@@ -435,7 +481,26 @@ function ScoringPage({ onSave }) {
             </div>
             <div style={{ marginTop: 16 }}><label className="filter-label">Crescita & News</label><div style={{ fontSize: 14 }}>{result.growth?.map(g => GROWTH_LABELS[g] || g).join(', ') || 'Nessuna significativa'}</div></div>
           </div>
-          <div className="card" style={{ background: `${tier.color}08`, borderColor: `${tier.color}44` }}><h3 className="filter-label" style={{ color: tier.color }}>Analisi Strategica e Fonti</h3><div style={{ fontSize: 14, fontStyle: 'italic' }}>{result.analysis_summary?.split('\n').map((line, i) => <div key={i} style={{ marginBottom: 6 }}>{line}</div>)}</div>{result.data_sources && <div style={{ fontSize: 11, marginTop: 16, color: T.textDim }}><strong>Fonti verificate:</strong><br/>{result.data_sources}</div>}</div>
+          <div className="card" style={{ background: `${tier.color}08`, borderColor: `${tier.color}44` }}>
+             <h3 className="filter-label" style={{ color: tier.color }}>Analisi Strategica e Fonti</h3>
+             <div style={{ fontSize: 14, fontStyle: 'italic' }}>{result.analysis_summary?.split('\n').map((line, i) => <div key={i} style={{ marginBottom: 6 }}>{line}</div>)}</div>
+             
+             {result.managers && result.managers.length > 0 && (
+               <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${tier.color}44` }}>
+                  <h3 className="filter-label" style={{ color: tier.color }}>Referenti Travel (LinkedIn)</h3>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {result.managers.map((m, i) => (
+                      <div key={i} style={{ background: '#fff', border: `1px solid ${tier.color}33`, padding: '8px 12px', borderRadius: 4 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{m.name}</div>
+                        <div style={{ fontSize: 11, color: T.textDim }}>{m.role}</div>
+                      </div>
+                    ))}
+                  </div>
+               </div>
+             )}
+
+             {result.data_sources && <div style={{ fontSize: 11, marginTop: 16, color: T.textDim }}><strong>Fonti verificate:</strong><br/>{result.data_sources}</div>}
+          </div>
         </div>
         <div className="card" style={{ textAlign: 'center' }}>
           <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ArcGauge score={total} color={tier.color} size={180} stroke={16} /><div style={{ position: 'absolute' }}><div style={{ fontSize: 48, fontWeight: 700, color: tier.color }}>{total}</div><TierBadge score={total} /></div></div></div>
