@@ -23,27 +23,39 @@ const CORS = {
   'Content-Type': 'application/json',
 };
 
+let memoryFallback = [...ACCENTURE_SEED]; // Memoria locale Lambda (persiste per pochi minuti)
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: CORS, body: '' };
   }
 
-  const store = getStore('leads');
-  const STORE_KEY = 'pipeline_v1'; // Versione rinfrescata della chiave
+  const STORE_KEY = 'pipeline_v1';
+  let store = null;
+  let useMemory = false;
+
+  try {
+    store = getStore('leads');
+    // Test base access per verificare che Blobs sia realmente disponibile
+    await store.get(STORE_KEY);
+  } catch (err) {
+    console.warn("Netlify Blobs non configurato correttamente. Fallback in RAM attiva.", err.message);
+    useMemory = true;
+  }
 
   // GET: return all leads
   if (event.httpMethod === 'GET') {
+    if (useMemory) {
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(memoryFallback) };
+    }
+    
     try {
       const data = await store.get(STORE_KEY, { type: 'json' });
       const leads = data && Array.isArray(data) ? data : ACCENTURE_SEED;
-      return { 
-        statusCode: 200, 
-        headers: CORS, 
-        body: JSON.stringify(leads) 
-      };
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(leads) };
     } catch (err) {
       console.error("Errore lettura Blobs:", err);
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(ACCENTURE_SEED) };
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(memoryFallback) };
     }
   }
 
@@ -52,18 +64,19 @@ exports.handler = async (event) => {
     try {
       const newLeadRaw = JSON.parse(event.body);
       
-      // Recupero stato attuale o seed
       let current;
-      try {
-        current = await store.get(STORE_KEY, { type: 'json' });
-        if (!current || !Array.isArray(current)) {
+      if (useMemory) {
+        current = memoryFallback;
+      } else {
+        try {
+          current = await store.get(STORE_KEY, { type: 'json' });
+          if (!current || !Array.isArray(current)) current = ACCENTURE_SEED;
+        } catch {
           current = ACCENTURE_SEED;
         }
-      } catch {
-        current = ACCENTURE_SEED;
       }
 
-      // Evita duplicati basati sul nome (opzionale ma utile)
+      // Evita duplicati basati sul nome
       const exists = current.find(l => l.name.toLowerCase() === newLeadRaw.name.toLowerCase());
       if (exists) {
         return { statusCode: 200, headers: CORS, body: JSON.stringify(current) };
@@ -72,20 +85,16 @@ exports.handler = async (event) => {
       const newLead = { ...newLeadRaw, id: Date.now() };
       const updated = [newLead, ...current];
       
-      await store.setJSON(STORE_KEY, updated);
+      if (useMemory) {
+        memoryFallback = updated; // Salva temporaneamente
+      } else {
+        await store.setJSON(STORE_KEY, updated);
+      }
       
-      return { 
-        statusCode: 200, 
-        headers: CORS, 
-        body: JSON.stringify(updated) 
-      };
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(updated) };
     } catch (err) {
-      console.error("Errore salvataggio Blobs:", err);
-      return { 
-        statusCode: 500, 
-        headers: CORS, 
-        body: JSON.stringify({ error: err.message }) 
-      };
+      console.error("Errore salvataggio:", err);
+      return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err.message }) };
     }
   }
 
