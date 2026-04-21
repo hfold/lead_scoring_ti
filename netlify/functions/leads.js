@@ -23,39 +23,30 @@ const CORS = {
   'Content-Type': 'application/json',
 };
 
-let memoryFallback = [...ACCENTURE_SEED]; // Memoria locale Lambda (persiste per pochi minuti)
-
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: CORS, body: '' };
   }
 
   const STORE_KEY = 'pipeline_v1';
-  let store = null;
-  let useMemory = false;
+  const siteID = process.env.NETLIFY_SITE_ID;
+  const token = process.env.NETLIFY_TOKEN;
 
-  try {
-    store = getStore('leads');
-    // Test base access per verificare che Blobs sia realmente disponibile
-    await store.get(STORE_KEY);
-  } catch (err) {
-    console.warn("Netlify Blobs non configurato correttamente. Fallback in RAM attiva.", err.message);
-    useMemory = true;
+  if (!siteID || !token) {
+    return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: 'Missing NETLIFY_SITE_ID or NETLIFY_TOKEN env vars' }) };
   }
+
+  const store = getStore({ name: 'leads', siteID, token });
 
   // GET: return all leads
   if (event.httpMethod === 'GET') {
-    if (useMemory) {
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(memoryFallback) };
-    }
-    
     try {
       const data = await store.get(STORE_KEY, { type: 'json' });
       const leads = data && Array.isArray(data) ? data : ACCENTURE_SEED;
       return { statusCode: 200, headers: CORS, body: JSON.stringify(leads) };
     } catch (err) {
       console.error("Errore lettura Blobs:", err);
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(memoryFallback) };
+      return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err.message }) };
     }
   }
 
@@ -63,20 +54,15 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'POST') {
     try {
       const newLeadRaw = JSON.parse(event.body);
-      
+
       let current;
-      if (useMemory) {
-        current = memoryFallback;
-      } else {
-        try {
-          current = await store.get(STORE_KEY, { type: 'json' });
-          if (!current || !Array.isArray(current)) current = ACCENTURE_SEED;
-        } catch {
-          current = ACCENTURE_SEED;
-        }
+      try {
+        current = await store.get(STORE_KEY, { type: 'json' });
+        if (!current || !Array.isArray(current)) current = ACCENTURE_SEED;
+      } catch {
+        current = ACCENTURE_SEED;
       }
 
-      // Evita duplicati basati sul nome
       const exists = current.find(l => l.name.toLowerCase() === newLeadRaw.name.toLowerCase());
       if (exists) {
         return { statusCode: 200, headers: CORS, body: JSON.stringify(current) };
@@ -84,13 +70,8 @@ exports.handler = async (event) => {
 
       const newLead = { ...newLeadRaw, id: Date.now() };
       const updated = [newLead, ...current];
-      
-      if (useMemory) {
-        memoryFallback = updated; // Salva temporaneamente
-      } else {
-        await store.setJSON(STORE_KEY, updated);
-      }
-      
+      await store.setJSON(STORE_KEY, updated);
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify(updated) };
     } catch (err) {
       console.error("Errore salvataggio:", err);
@@ -100,3 +81,4 @@ exports.handler = async (event) => {
 
   return { statusCode: 405, headers: CORS, body: 'Method Not Allowed' };
 };
+
