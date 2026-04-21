@@ -56,6 +56,16 @@
 
     .ai-log { font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-top: 6px; padding-left: 14px; color: #7CCB92; border-left: 1px solid #C6283A33; }
     .ai-step { font-weight: 600; color: #C6283A; margin-top: 10px; border-left: 3px solid #C6283A; padding-left: 10px; }
+
+    .insight-card {
+      background: #fff; border: 1px solid #E3E0D8; border-radius: 4px; padding: 12px;
+      display: flex; gap: 12px; transition: all 150ms;
+    }
+    .insight-card:hover { border-color: #C9C4B8; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .insight-icon { font-size: 18px; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #F4F2EC; border-radius: 4px; }
+    .insight-content { flex: 1; }
+    .insight-title { font-size: 9px; font-family: T.mono; color: #8B8678; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 2px; }
+    .insight-text { font-size: 12px; color: #1A1F2A; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -95,9 +105,9 @@ ATTRIBUTI DA TROVARE:
 STRATEGIA AGENTICA:
 - Usa i tool di Google Search forniti per accedere in tempo reale a notizie recenti, dati aziendali, organigrammi e rassegna stampa.
 - Sii estremamente preciso cercando fonti ufficiali tramite Google.
-- Una volta raccolti dati sufficienti, restituisci ESCLUSIVAMENTE un JSON valido, formattato secondo il seguente schema.
+- Una volta raccolti dati sufficienti, restituisci ESCLUSIVAMENTE un JSON valido.
 
-FORMATO JSON FINALE (solo campi indicati):
+FORMATO JSON FINALE (IMPORTANTE: mantieni i prefissi delle icone in analysis_summary):
 {
   "sector": "...",
   "employees": 123,
@@ -105,7 +115,7 @@ FORMATO JSON FINALE (solo campi indicati):
   "growth": ["Hiring"],
   "travelMgr": true,
   "city": "...",
-  "analysis_summary": "• SETTORE: motivazione settore scelto\n• DIMENSIONE: fonte e dato dipendenti\n• VICINANZA AV: elenco sedi trovate e vicinanza alle stazioni AV\n• CRESCITA: evidenze news recenti\n• TRAVEL MANAGER: evidenza presenza/assenza figura",
+  "analysis_summary": "🚀 CRESCITA: ...\n📍 LOGISTICA: ...\n👔 GOVERNANCE: ...\n💡 INSIGHT: ...",
   "hsr_offices": "es. 3 sedi: Milano (Centrale AV ✓), Roma (Termini AV ✓), Catania (no AV ✗)",
   "data_sources": "Lista sintetica delle fonti trovate"
 }`;
@@ -285,8 +295,8 @@ function PipelineRow({ lead, isNew }) {
         </div>
         <TierBadge score={total} />
       </div>
-      <div style={{ maxHeight: hover ? 160 : 0, opacity: hover ? 1 : 0, overflow: 'hidden', marginTop: hover ? 14 : 0, paddingTop: hover ? 14 : 0, borderTop: hover ? `1px dashed ${T.line}` : 'none', transition: 'all 220ms' }}>
-         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+      <div style={{ maxHeight: hover ? 800 : 0, opacity: hover ? 1 : 0, overflow: 'hidden', marginTop: hover ? 14 : 0, paddingTop: hover ? 14 : 0, borderTop: hover ? `1px dashed ${T.line}` : 'none', transition: 'all 300ms ease-in-out' }}>
+         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
             {breakdown.map(b => (
               <div key={b.label}>
                 <div style={{ fontSize: 9, color: T.textMuted, textTransform: 'uppercase' }}>{BREAKDOWN_LABELS[b.label]}</div>
@@ -295,7 +305,35 @@ function PipelineRow({ lead, isNew }) {
               </div>
             ))}
          </div>
-         <p style={{ marginTop: 12, fontSize: 11, color: T.textDim, fontStyle: 'italic' }}>{lead.analysis_summary ||'Analisi lead effettuata tramite Google Search.'}</p>
+         
+         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {lead.analysis_summary && lead.analysis_summary.split('\n').filter(l => l.trim()).map((line, i) => {
+              const [header, ...rest] = line.split(':');
+              const iconMatch = header.match(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}]/u);
+              const icon = iconMatch ? iconMatch[0] : '•';
+              const title = header.replace(icon, '').replace(':', '').trim();
+              return (
+                <div key={i} className="insight-card">
+                  <div className="insight-icon">{icon}</div>
+                  <div className="insight-content">
+                    <div className="insight-title">{title}</div>
+                    <div className="insight-text">{rest.join(':').trim()}</div>
+                  </div>
+                </div>
+              );
+            })}
+         </div>
+
+         <div style={{ marginTop: 12, padding: '10px', background: '#F4F2EC', borderRadius: 4, display: 'flex', gap: 12, alignItems: 'center' }}>
+            <span style={{ fontSize: 14 }}>📍</span>
+            <div style={{ fontSize: 11, color: T.textDim }}><strong>Logistica AV:</strong> {lead.hsr_offices || 'Dato non disponibile'}</div>
+         </div>
+
+         {lead.data_sources && (
+           <div style={{ marginTop: 12, fontSize: 9, color: T.textMuted, fontFamily: T.mono, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+             Fonti: {lead.data_sources}
+           </div>
+         )}
       </div>
     </div>
   );
