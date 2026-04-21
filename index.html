@@ -105,7 +105,7 @@ ATTRIBUTI DA TROVARE:
 STRATEGIA AGENTICA:
 - Usa i tool di Google Search forniti per accedere in tempo reale a notizie recenti, dati aziendali, organigrammi e rassegna stampa.
 - Sii estremamente preciso cercando fonti ufficiali tramite Google.
-- Una volta raccolti dati sufficienti, restituisci ESCLUSIVAMENTE un JSON valido.
+- Una volta raccolti dati sufficienti, restituisci ESCLUSIVAMENTE un JSON valido. Non usare formattazioni come Markdown. Evita ASSOLUTAMENTE l'uso di doppi apici (") all'interno dei testi per non invalidare il JSON.
 
 FORMATO JSON FINALE (IMPORTANTE: mantieni i prefissi delle icone in analysis_summary):
 {
@@ -126,7 +126,7 @@ Il tuo obiettivo è individuare figure chiave (Travel Manager, Mobility Manager,
 STRATEGIA AGENTICA:
 - Usa Google Search inserendo diciture come: site:it.linkedin.com/in "Travel Manager" OR "Mobility" "NOME AZIENDA".
 - Recupera nome, cognome, ruolo esatto e il link al profilo LinkedIn.
-- Restituisci ESCLUSIVAMENTE un JSON valido, formattato come un array di oggetti chiamato 'managers'.
+- Restituisci ESCLUSIVAMENTE un JSON valido, formattato come un array di oggetti chiamato 'managers'. Non usare Markdown o virgolette doppie nei testi liberi.
 
 FORMATO JSON FINALE:
 {
@@ -192,9 +192,19 @@ async function callGemini_Agent(apiKey, model, messages, onLog) {
 }
 
 function parseResult(content) {
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Risultato finale non in formato JSON.");
-  return JSON.parse(jsonMatch[0]);
+  try {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Nessun JSON trovato nella risposta.");
+    
+    // Rimuovi eventuali trailing comma prima della chiusura (spesso errore tipico delle AI)
+    let jsonStr = jsonMatch[0].replace(/,\s*([\]}])/g, '$1');
+    /* Rimuoviamo eventuali doppi apici non escapati usando un try debole, ma ci affidiamo al prompt */
+    
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.error("Grezzo ricevuto:", content);
+    throw new Error(`Si è verificato un errore di parsing JSON. ${err.message}`);
+  }
 }
 
 // ============ LOGIC HELPERS ============
@@ -444,14 +454,29 @@ function ScoringPage({ onSave }) {
     try {
       addLog(`Avvio ricerca parallela (Analisi + LinkedIn) su ${name}...`, 'step');
       
-      const [baseData, linkedinData] = await Promise.all([
+      const results = await Promise.allSettled([
         callGemini_Agent(null, 'gemini-2.5-flash', messages.current, msg => addLog(`[Analisi] ${msg}`)),
         callGemini_Agent(null, 'gemini-2.5-flash', linkedinMessages, msg => addLog(`[LinkedIn] ${msg}`))
       ]);
 
+      const baseResult = results[0];
+      const linkedinResult = results[1];
+
+      if (baseResult.status === 'rejected') {
+        throw new Error(baseResult.reason);
+      }
+
+      const baseData = baseResult.value;
+      const linkedinData = linkedinResult.status === 'fulfilled' ? linkedinResult.value : { managers: [] };
+
+      if (linkedinResult.status === 'rejected') {
+         addLog(`[LinkedIn] Ricerca contatti fallita. Passo oltre.`, 'log');
+         console.warn("LinkedIn parse error:", linkedinResult.reason);
+      }
+
       setResult({ ...baseData, managers: linkedinData.managers || [], name }); 
       setState('RESULT');
-    } catch (err) { addLog("ERRORE: " + err.message); setState('IDLE'); }
+    } catch (err) { addLog("ERRORE CRITICO: " + err.message); setState('IDLE'); }
   };
 
   if (state === 'IDLE' || state === 'EVALUATING') {
