@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RailConnect B2B · Sales Intelligence (Agentic v3)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+    body { background: #FAFAF7; -webkit-font-smoothing: antialiased; font-family: 'Inter', system-ui, sans-serif; color: #1A1F2A; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #F4F2EC; }
+    ::-webkit-scrollbar-thumb { background: #C9C4B8; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #8B8678; }
+
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 4px; background: #E3E0D8; border-radius: 2px; outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #C6283A; cursor: pointer; border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #C6283A44;
+    }
+
+    @keyframes flash {
+      0%   { box-shadow: 0 0 0 0 #C6283A55; transform: scale(1.005); }
+      40%  { box-shadow: 0 0 0 8px transparent; }
+      100% { box-shadow: none; transform: scale(1); }
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loader {
+      width: 20px; height: 20px;
+      border: 2px solid #C6283A22; border-top-color: #C6283A;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+
+    input:focus, select:focus, textarea:focus { outline: 2px solid #C6283A44; outline-offset: 1px; }
+    button { outline: none; cursor: pointer; transition: all 120ms; border: none; }
+    button:active { transform: scale(0.98); }
+    button:disabled { cursor: not-allowed; opacity: 0.6; }
+
+    .card { background: #FFFFFF; border: 1px solid #E3E0D8; border-radius: 6px; padding: 24px; }
+    .filter-label { display: block; font-size: 10px; font-family: 'JetBrains Mono', monospace; color: #8B8678; letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 6px; }
+    .input-field { background: #F4F2EC; border: 1px solid #E3E0D8; padding: 10px 14px; border-radius: 4px; font-size: 13px; width: 100%; color: #1A1F2A; }
+
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-content { background: #fff; width: 440px; padding: 32px; border-radius: 8px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); border: 1px solid #E3E0D8; }
+
+    .ai-log { font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-top: 6px; padding-left: 14px; color: #7CCB92; border-left: 1px solid #C6283A33; }
+    .ai-step { font-weight: 600; color: #C6283A; margin-top: 10px; border-left: 3px solid #C6283A; padding-left: 10px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+
+  <script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect, useRef } = React;
+
+// ============ DESIGN TOKENS & MAPPINGS ============
+const T = {
+  bg: '#FAFAF7', bgElev: '#FFFFFF', bgCard: '#F4F2EC',
+  line: '#E3E0D8', lineStrong: '#C9C4B8',
+  text: '#1A1F2A', textDim: '#4F5A6B', textMuted: '#8B8678',
+  accent: '#C6283A', hot: '#C6283A', warm: '#B8751F', cold: '#8B8678', success: '#2F7D5B',
+  mono: "'JetBrains Mono', ui-monospace, monospace", sans: "'Inter', system-ui, sans-serif",
+};
+
+const SECTOR_LABELS = { 'Consulting': 'Consulenza', 'Pharma': 'Farmaceutico', 'Banking': 'Bancario', 'Manufacturing': 'Manifatturiero', 'Public Admin': 'P. Amministrazione', 'Other': 'Altro' };
+const GROWTH_LABELS = { 'New office': 'Nuova sede', 'Hiring': 'Assunzioni', 'M&A': 'M&A', 'None': 'Nessuno' };
+const BREAKDOWN_LABELS = { 'Sector': 'Settore', 'Size': 'Dimensione', 'HSR': 'Vicinanza AV', 'Growth': 'Crescita', 'Travel Mgr': 'Resp. Viaggi' };
+
+// ============ AGENTIC PROMPT ============
+const GEMINI_SYSTEM_PROMPT = `Sei un Agente di Sales Intelligence esperto nel settore ferroviario.
+Il tuo obiettivo è analizzare un'azienda per determinare il suo Lead Score.
+
+ATTRIBUTI DA TROVARE:
+1. SETTORE: Scegli tra [Consulting, Pharma, Banking, Manufacturing, Public Admin, Other].
+2. DIMENSIONE: Numero dipendenti globale.
+3. VICINANZA ALTA VELOCITÀ: Cerca quante sedi ha l'azienda in Italia (numero, città). Per ciascuna sede, verifica se esiste una stazione dell'Alta Velocità (Frecciarossa/Italo) entro 1-2 km o nella stessa città. Considera "hsrServed: true" se almeno la sede principale o il 50% delle sedi risulta vicina a stazioni AV.
+4. CRESCITA: News recenti di assunzioni, M&A o nuove sedi.
+5. TRAVEL MANAGER: Esiste una figura o un ufficio viaggi dedicato?
+
+STRATEGIA AGENTICA:
+- Usa i tool di Google Search forniti per accedere in tempo reale a notizie recenti, dati aziendali, organigrammi e rassegna stampa.
+- Sii estremamente preciso cercando fonti ufficiali tramite Google.
+- Una volta raccolti dati sufficienti, restituisci ESCLUSIVAMENTE un JSON valido, formattato secondo il seguente schema.
+
+FORMATO JSON FINALE (solo campi indicati):
+{
+  "sector": "...",
+  "employees": 123,
+  "hsrServed": true,
+  "growth": ["Hiring"],
+  "travelMgr": true,
+  "city": "...",
+  "analysis_summary": "• SETTORE: motivazione settore scelto\n• DIMENSIONE: fonte e dato dipendenti\n• VICINANZA AV: elenco sedi trovate e vicinanza alle stazioni AV\n• CRESCITA: evidenze news recenti\n• TRAVEL MANAGER: evidenza presenza/assenza figura",
+  "hsr_offices": "es. 3 sedi: Milano (Centrale AV ✓), Roma (Termini AV ✓), Catania (no AV ✗)",
+  "data_sources": "Lista sintetica delle fonti trovate"
+}`;
+
+// ============ AI AGENT SERVICE ============
+async function callGemini_Agent(apiKey, model, messages, onLog) {
+  const modelName = model || "gemini-2.5-flash";
+
+  onLog(`Avvio analisi con ${modelName}...`, 'step');
+  onLog(`Esecuzione query su Google Search in corso...`);
+  
+  const sysMsg = messages.find(m => m.role === 'system')?.content || "";
+  const userMsg = messages.find(m => m.role === 'user')?.content || "";
+
+  const payload = {
+    systemInstruction: { parts: [{ text: sysMsg }] },
+    contents: [{ parts: [{ text: userMsg }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { temperature: 0.1 }
+  };
+
+  // Use Netlify proxy if available (no key needed), otherwise fallback to direct call
+  const isNetlify = window.location.hostname.includes('netlify.app') || window.location.hostname.includes('netlify.com') || window.location.pathname.startsWith('/');
+  const useProxy = isNetlify && !apiKey;
+
+  let response;
+  if (useProxy) {
+    response = await fetch('/.netlify/functions/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelName, payload })
+    });
+  } else {
+    if (!apiKey) throw new Error("API Key non configurata. Vai su ⚙️ Impostazioni per inserirla.");
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const candidate = data.candidates?.[0];
+  
+  if (!candidate) throw new Error("Risposta vuota da Gemini");
+
+  if (candidate.groundingMetadata && candidate.groundingMetadata.searchEntryPoint) {
+    onLog(`Dati recuperati da Google (Grounding). Elaborazione in corso...`, 'step');
+  }
+
+  const text = candidate.content.parts[0].text;
+  return parseResult(text);
+}
+
+function parseResult(content) {
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Risultato finale non in formato JSON.");
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ============ LOGIC HELPERS ============
+function computeScoreInfo({ sector, employees, hsrServed, growth, travelMgr }) {
+  const sectorScore = ({'Consulting': 92, 'Pharma': 85, 'Banking': 88, 'Manufacturing': 60, 'Public Admin': 72, 'Other': 40}[sector] || 40) * 0.25;
+  const empNorm = Math.min(1, Math.max(0, Math.log10(Math.max(employees, 50) / 50) / Math.log10(10000 / 50)));
+  const empScore = empNorm * 100 * 0.25;
+  const hsrScore = (hsrServed ? 100 : 10) * 0.20;
+  const growthArr = Array.isArray(growth) ? growth : [];
+  const growthScore = Math.min(100, growthArr.reduce((s, g) => s + ({'New office': 30, 'Hiring': 25, 'M&A': 40, 'None': 0}[g] || 0), 0)) * 0.15;
+  const travelScore = (travelMgr ? 100 : 20) * 0.15;
+  return {
+    total: Math.round(sectorScore + empScore + hsrScore + growthScore + travelScore),
+    breakdown: [
+      { label: 'Sector', value: Math.round(sectorScore), max: 25 },
+      { label: 'Size', value: Math.round(empScore), max: 25 },
+      { label: 'HSR', value: Math.round(hsrScore), max: 20 },
+      { label: 'Growth', value: Math.round(growthScore), max: 15 },
+      { label: 'Travel Mgr', value: Math.round(travelScore), max: 15 },
+    ],
+  };
+}
+
+function computeScore(l) { return computeScoreInfo(l).total; }
+
+function classify(score) {
+  if (score >= 75) return { tier: 'HOT', color: T.hot, label: 'CALDO' };
+  if (score >= 45) return { tier: 'WARM', color: T.warm, label: 'TIEPIDO' };
+  return { tier: 'COLD', color: T.cold, label: 'FREDDO' };
+}
+
+// ============ UI COMPONENTS ============
+function TierBadge({ score }) {
+  const { label, color } = classify(score);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', borderRadius: 3, background: `${color}18`, border: `1px solid ${color}44`, color, fontFamily: T.mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.6 }}>
+      <span style={{ width: 6, height: 6, background: color, borderRadius: '50%' }} />
+      {label}
+    </span>
+  );
+}
+
+function ArcGauge({ score, size = 180, stroke = 18, color }) {
+  const r = (size - stroke) / 2, cx = size / 2, cy = size / 2;
+  const startAngle = 135, endAngle = 405;
+  const sweep = endAngle - startAngle;
+  const pct = Math.max(0, Math.min(100, score)) / 100;
+  const activeEnd = startAngle + sweep * pct;
+  const polar = (a) => [cx + r * Math.cos((a - 90) * Math.PI / 180), cy + r * Math.sin((a - 90) * Math.PI / 180)];
+  const path = (a1, a2) => `M ${polar(a1)[0]} ${polar(a1)[1]} A ${r} ${r} 0 ${a2 - a1 > 180 ? 1 : 0} 1 ${polar(a2)[0]} ${polar(a2)[1]}`;
+  return (
+    <svg width={size} height={size}>
+      <path d={path(startAngle, endAngle)} stroke={T.line} strokeWidth={stroke} fill="none" strokeLinecap="round" />
+      <path d={path(startAngle, activeEnd)} stroke={color} strokeWidth={stroke} fill="none" strokeLinecap="round" style={{ transition: 'all 500ms cubic-bezier(.2,.8,.2,1)' }} />
+    </svg>
+  );
+}
+
+function MiniBars({ breakdown, height = 28 }) {
+  return (
+    <svg width={70} height={height} style={{ display: 'block' }}>
+      {breakdown.map((b, i) => {
+        const pct = b.max > 0 ? b.value / b.max : 0;
+        const h = Math.max(2, pct * height);
+        return (
+          <g key={b.label} transform={`translate(${i * 14}, 0)`}>
+            <rect x={0} y={0} width={10} height={height} fill={T.line} rx={1} />
+            <rect x={0} y={height - h} width={10} height={h} fill={pct > 0.7 ? T.accent : pct > 0.4 ? T.warm : T.textMuted} rx={1} />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function SettingsModal({ settings, onSave, onClose }) {
+  const [key, setKey] = useState(settings.apiKey || '');
+  const [model, setModel] = useState(settings.model || 'gemini-2.5-flash');
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>Impostazioni Agente Gemini</h3>
+        <div style={{ marginBottom: 20 }}>
+          <label className="filter-label">Google API Key (AI Studio)</label>
+          <input type="password" className="input-field" value={key} onChange={e => setKey(e.target.value)} placeholder="AIzaSy..." />
+        </div>
+        <div style={{ marginBottom: 24 }}>
+          <label className="filter-label">Modello Agente</label>
+          <select className="input-field" value={model} onChange={e => setModel(e.target.value)}>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button onClick={() => onSave({ apiKey: key, model })} style={{ flex: 1, background: T.accent, color: '#fff', padding: '10px', borderRadius: 4, fontWeight: 600 }}>Salva</button>
+          <button onClick={onClose} style={{ flex: 1, background: T.bgCard, color: T.textDim, padding: '10px', borderRadius: 4 }}>Chiudi</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ SEED ============
+const ACCENTURE_LEAD = {
+  id: 1,
+  name: 'Accenture',
+  sector: 'Consulting',
+  city: 'Milano',
+  employees: 20000,
+  hsrServed: true,
+  growth: ['Hiring'],
+  travelMgr: true,
+  hsr_offices: '9/12 sedi vicine ad AV: Milano, Roma, Torino, Firenze, Bologna, Napoli, Verona, Padova, Modena/Reggio Emilia ✓ — Cagliari, Cosenza, Misterbianco ✗',
+  analysis_summary: '• SETTORE: Accenture è la principale società di consulenza e servizi IT globale, operante in Italia con forte presenza nelle aziende enterprise.\n• DIMENSIONE: ~20.000 dipendenti in Italia (750.000 globali), con sedi nelle principali città.\n• VICINANZA AV: 9 sedi su 12 vicine a stazioni AV (Milano Centrale, Roma Termini, Torino Porta Nuova, Firenze SMN, Bologna Centrale, Napoli Centrale, Verona Porta Nuova, Padova, Reggio Emilia Mediopadana). Cagliari, Cosenza e Misterbianco non servite da AV.\n• CRESCITA: Assunzioni attive in Italia (Stage, Software Engineer, AI specialist). Investimenti strategici in AI, digitale e cloud. Alcuni tagli globali nel 2023 ma crescita nei settori chiave.\n• TRAVEL MANAGER: Global travel and events senior director con responsabili per area geografica. Politiche di viaggio strutturate con carte aziendali e rimborsi. Expertise interna nel settore Travel, Airline & Hospitality.',
+  data_sources: 'Sito ufficiale Accenture.com, LinkedIn Jobs Italia, Il Sole 24 Ore, Bloomberg'
+};
+
+// ============ PIPELINE ROW ============
+function PipelineRow({ lead, isNew }) {
+  const [hover, setHover] = useState(false);
+  const { total, breakdown } = useMemo(() => computeScoreInfo(lead), [lead]);
+  const tier = classify(total);
+
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ background: hover ? T.bgCard : T.bgElev, border: `1px solid ${hover ? T.lineStrong : T.line}`, borderLeft: `3px solid ${tier.color}`, borderRadius: 4, padding: '14px 18px', position: 'relative', animation: isNew ? 'flash 1.2s ease-out' : 'none' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr auto auto', gap: 16, alignItems: 'center' }}>
+        <div style={{ fontFamily: T.mono, fontSize: 28, fontWeight: 600, color: tier.color }}>{String(total).padStart(2, '0')}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 10, border: `1px solid ${T.line}`, padding: '2px 5px', borderRadius: 2, fontFamily: T.mono }}>{lead.sector.substring(0,3).toUpperCase()}</span>
+            <span style={{ fontSize: 10, color: T.textMuted, fontFamily: T.mono }}>{lead.city}</span>
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: T.text }}>{lead.name}</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <MiniBars breakdown={breakdown} height={30} />
+          <span style={{ fontSize: 9, color: T.textMuted, fontFamily: T.mono }}>SET · DIM · AV · CRE · RV</span>
+        </div>
+        <TierBadge score={total} />
+      </div>
+      <div style={{ maxHeight: hover ? 160 : 0, opacity: hover ? 1 : 0, overflow: 'hidden', marginTop: hover ? 14 : 0, paddingTop: hover ? 14 : 0, borderTop: hover ? `1px dashed ${T.line}` : 'none', transition: 'all 220ms' }}>
+         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+            {breakdown.map(b => (
+              <div key={b.label}>
+                <div style={{ fontSize: 9, color: T.textMuted, textTransform: 'uppercase' }}>{BREAKDOWN_LABELS[b.label]}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 13 }}>{b.value}<span style={{ fontSize: 10, color: '#aaa' }}>/{b.max}</span></div>
+                <div style={{ height: 3, background: T.line, marginTop: 4 }}><div style={{ height: '100%', background: tier.color, width: `${(b.value/b.max)*100}%` }} /></div>
+              </div>
+            ))}
+         </div>
+         <p style={{ marginTop: 12, fontSize: 11, color: T.textDim, fontStyle: 'italic' }}>{lead.analysis_summary ||'Analisi lead effettuata tramite Google Search.'}</p>
+      </div>
+    </div>
+  );
+}
+
+// ============ PAGES ============
+function PipelinePage({ pipeline, newestId }) {
+  const [search, setSearch] = useState('');
+  const [scoreRange, setScoreRange] = useState([0, 100]);
+  const filtered = useMemo(() => pipeline.map(l => ({ ...l, _score: computeScore(l) })).filter(l => l.name.toLowerCase().includes(search.toLowerCase()) && l._score >= scoreRange[0] && l._score <= scoreRange[1]).sort((a,b) => b._score - a._score), [pipeline, search, scoreRange]);
+
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px' }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24, padding: '20px', background: T.bgElev, border: `1px solid ${T.line}`, borderRadius: 8, alignItems: 'flex-end' }}>
+        <div style={{ flex: 1 }}><label className="filter-label">Cerca Azienda</label><input className="input-field" placeholder="Nome..." value={search} onChange={e => setSearch(e.target.value)} /></div>
+        <div style={{ minWidth: 240 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}><label className="filter-label">Range Score</label><span style={{ fontSize: 11, fontFamily: T.mono }}>{scoreRange[0]} - {scoreRange[1]}</span></div>
+          <div style={{ display: 'flex', gap: 10 }}><input type="range" min="0" max="100" value={scoreRange[0]} onChange={e => setScoreRange([Math.min(parseInt(e.target.value), scoreRange[1]), scoreRange[1]])} /><input type="range" min="0" max="100" value={scoreRange[1]} onChange={e => setScoreRange([scoreRange[0], Math.max(parseInt(e.target.value), scoreRange[0])])} /></div>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gap: 10 }}>{filtered.map(l => <PipelineRow key={l.id} lead={l} isNew={l.id === newestId} />)}</div>
+    </div>
+  );
+}
+
+function ScoringPage({ settings, onSave, onOpenSettings }) {
+  const [state, setState] = useState('IDLE'); // IDLE, EVALUATING, RESULT
+  const [name, setName] = useState('');
+  const [result, setResult] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const messages = useRef([]);
+
+  const addLog = (msg, type = 'log') => setLogs(prev => [...prev, { id: Date.now() + Math.random(), msg, type }]);
+
+  const handleEvaluate = async () => {
+    if (!name) return;
+    const onNetlify = window.location.hostname !== 'localhost' && window.location.hostname !== '' && !window.location.protocol.startsWith('file');
+    if (!settings.apiKey && !onNetlify) { onOpenSettings(); return; }
+    setState('EVALUATING'); setLogs([]);
+    messages.current = [{ role: "system", content: GEMINI_SYSTEM_PROMPT }, { role: "user", content: `Analizza l'azienda: ${name}. Sii meticoloso e usa Google per recuperare info recenti e valide.` }];
+    try {
+      const data = await callGemini_Agent(settings.apiKey, settings.model, messages.current, addLog);
+      setResult({ ...data, name }); setState('RESULT');
+    } catch (err) { addLog("ERRORE: " + err.message); setState('IDLE'); }
+  };
+
+  if (state === 'IDLE' || state === 'EVALUATING') {
+    return (
+      <div style={{ maxWidth: 640, margin: '60px auto', textAlign: 'center' }}>
+        <h2 style={{ fontSize: 24, fontWeight: 600, marginBottom: 12 }}>Valuta Lead con Agente Autonomo</h2>
+        <p style={{ color: T.textDim, marginBottom: 32 }}>L'agente cercherà attivamente informazioni su Google per garantire la massima precisione.</p>
+        {!settings.apiKey && <div style={{ marginBottom: 16, padding: '10px 14px', background: '#FFF8E1', border: '1px solid #FFD54F', borderRadius: 4, fontSize: 12, color: '#7B5800' }}>⚠️ API Key Gemini non configurata. Clicca ⚙️ in alto a destra per inserirla.</div>}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}><input className="input-field" style={{ fontSize: 16, padding: '14px' }} placeholder="Nome Azienda..." value={name} onChange={e => setName(e.target.value)} disabled={state === 'EVALUATING'} /><button onClick={handleEvaluate} disabled={!name || state === 'EVALUATING'} style={{ background: T.accent, color: '#fff', padding: '0 32px', borderRadius: 4, fontWeight: 600 }}>Avvia Ricerca Agentica</button></div>
+        {(state === 'EVALUATING' || logs.length > 0) && <div style={{ textAlign: 'left', background: '#1A1F2A', padding: '24px', borderRadius: 4, border: '1px solid #333' }}>{state === 'EVALUATING' && <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}><div className="loader" style={{ borderColor: 'rgba(124, 203, 146, 0.2)', borderTopColor: '#7CCB92' }}></div><span style={{ color: '#7CCB92', fontWeight: 600 }}>Agente in azione...</span></div>}{logs.map(l => <div key={l.id} className={l.type === 'step' ? 'ai-step' : 'ai-log'}>{l.type === 'step' ? '' : '> '}{l.msg}</div>)}</div>}
+      </div>
+    );
+  }
+
+  const { total, breakdown } = computeScoreInfo(result);
+  const tier = classify(total);
+
+  return (
+    <div style={{ maxWidth: 900, margin: '32px auto', padding: '0 24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 32 }}>
+        <div style={{ display: 'grid', gap: 24 }}>
+          <div className="card"><h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Dati Validati dall'Agente</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+               <div><label className="filter-label">Settore</label><div style={{ fontSize: 14 }}>{SECTOR_LABELS[result.sector]}</div></div>
+               <div><label className="filter-label">Dipendenti</label><div style={{ fontSize: 14 }}>{result.employees?.toLocaleString()}</div></div>
+               <div><label className="filter-label">Vicinanza Alta Velocità</label><div style={{ fontSize: 14 }}>{result.hsrServed ? 'Sì' : 'No'}{result.hsr_offices && <span style={{ fontSize: 11, color: T.textDim, marginLeft: 8 }}>({result.hsr_offices})</span>}</div></div>
+               <div><label className="filter-label">Travel Manager</label><div style={{ fontSize: 14 }}>{result.travelMgr ? 'Sì' : 'No'}</div></div>
+            </div>
+            <div style={{ marginTop: 16 }}><label className="filter-label">Crescita & News</label><div style={{ fontSize: 14 }}>{result.growth?.map(g => GROWTH_LABELS[g] || g).join(', ') || 'Nessuna significativa'}</div></div>
+          </div>
+          <div className="card" style={{ background: `${tier.color}08`, borderColor: `${tier.color}44` }}><h3 className="filter-label" style={{ color: tier.color }}>Analisi Strategica e Fonti</h3><div style={{ fontSize: 14, fontStyle: 'italic' }}>{result.analysis_summary?.split('\n').map((line, i) => <div key={i} style={{ marginBottom: 6 }}>{line}</div>)}</div>{result.data_sources && <div style={{ fontSize: 11, marginTop: 16, color: T.textDim }}><strong>Fonti verificate:</strong><br/>{result.data_sources}</div>}</div>
+        </div>
+        <div className="card" style={{ textAlign: 'center' }}>
+          <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ArcGauge score={total} color={tier.color} size={180} stroke={16} /><div style={{ position: 'absolute' }}><div style={{ fontSize: 48, fontWeight: 700, color: tier.color }}>{total}</div><TierBadge score={total} /></div></div></div>
+          <button onClick={() => { onSave({...result, analysis_summary: result.analysis_summary }); setName(''); setState('IDLE'); }} style={{ width: '100%', background: T.success, color: '#fff', padding: '14px', borderRadius: 4, fontWeight: 600, marginTop: 24 }}>AGGIUNGI AL DB</button>
+          <button onClick={() => setState('IDLE')} style={{ marginTop: 12, background: 'transparent', color: T.textMuted }}>Annulla</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ STAT CHIP ============
+function StatChip({ label, value, color }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.1 }}>
+      <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 1 }}>{label}</span>
+      <span style={{ fontSize: 15, color: color || T.text, fontWeight: 600 }}>{value}</span>
+    </div>
+  );
+}
+
+// ============ APP ============
+function App() {
+  const [activeTab, setActiveTab] = useState('pipeline');
+  const [pipeline, setPipeline] = useState(() => {
+    try {
+      const saved = localStorage.getItem('railconnect_pipeline');
+      return saved ? JSON.parse(saved) : [ACCENTURE_LEAD];
+    } catch { return [ACCENTURE_LEAD]; }
+  });
+  const [newestId, setNewestId] = useState(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('gemini_settings')) || { apiKey: '', model: 'gemini-2.5-flash' });
+
+  useEffect(() => {
+    localStorage.setItem('railconnect_pipeline', JSON.stringify(pipeline));
+  }, [pipeline]);
+
+  const handleSaveSettings = (s) => { setSettings(s); localStorage.setItem('gemini_settings', JSON.stringify(s)); setIsSettingsOpen(false); };
+  const handleSave = (l) => { const f = { ...l, id: Date.now() }; setPipeline(p => [f, ...p]); setNewestId(f.id); setActiveTab('pipeline'); setTimeout(() => setNewestId(null), 1500); };
+
+  const handleExportHTML = () => {
+    try {
+      const seedJson = JSON.stringify(pipeline, null, 2);
+      const scriptTag = document.querySelector('script[type="text/babel"]');
+      const scriptContent = scriptTag.textContent
+        .replace(/const ACCENTURE_LEAD\s*=\s*\{[\s\S]*?\};/, `const SEED_DATA = ${seedJson};`)
+        .replace(/\[ACCENTURE_LEAD\]/g, 'SEED_DATA')
+        .replace(/return \[ACCENTURE_LEAD\];/g, 'return SEED_DATA;')
+        .replace(/\? \[ACCENTURE_LEAD\]/g, '? SEED_DATA');
+      const extScripts = Array.from(document.querySelectorAll('body > script[src]'))
+        .map(s => '  <scr' + 'ipt src="' + s.src + '" crossorigin></scr' + 'ipt>')
+        .join('\n');
+      const babelScript = '  <scr' + 'ipt type="text/babel" data-presets="react">' + scriptContent + '</scr' + 'ipt>';
+      const head = document.head.outerHTML;
+      const finalHtml = '<!doctype html>\n<html lang="it">\n' + head + '\n<body>\n  <div id="root"></div>\n' + extScripts + '\n' + babelScript + '\n</body>\n</html>';
+      const blob = new Blob([finalHtml], { type: 'text/html;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'railconnect-leads-' + new Date().toISOString().slice(0,10) + '.html';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch(e) { alert('Errore export: ' + e.message); }
+  };
+
+  const stats = useMemo(() => {
+    const scored = pipeline.map(l => ({ ...l, _score: computeScore(l) }));
+    return { total: scored.length, hot: scored.filter(l => l._score >= 75).length, warm: scored.filter(l => l._score >= 45 && l._score < 75).length, cold: scored.filter(l => l._score < 45).length, avg: scored.length ? Math.round(scored.reduce((s, l) => s + l._score, 0) / scored.length) : 0 };
+  }, [pipeline]);
+
+  const tabStyle = (a) => ({ padding: '11px 24px', fontSize: 13, fontWeight: a ? 600 : 400, background: 'transparent', color: a ? T.text : T.textDim, border: 'none', borderBottom: a ? `2px solid ${T.accent}` : '2px solid transparent', cursor: 'pointer' });
+
+  return (
+    <div style={{ background: T.bg, minHeight: '100vh', color: T.text, fontFamily: T.sans }}>
+      <header style={{ background: T.bgElev, borderBottom: `1px solid ${T.line}` }}>
+        <div style={{ padding: '14px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${T.line}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}><svg width={28} height={28}><rect width={28} height={28} rx={3} fill={T.accent} /><rect x={5} y={12} width={18} height={2} fill="#fff" /><rect x={5} y={16} width={12} height={2} fill="#fff" opacity="0.7" /><rect x={5} y={8} width={8} height={2} fill="#fff" opacity="0.5" /></svg><div><div style={{ fontSize: 14, fontWeight: 600 }}>RailConnect B2B</div><div style={{ fontSize: 10, fontFamily: T.mono, color: T.textMuted, letterSpacing: 1 }}>Sales Intelligence · Field Desk</div></div></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}><div style={{ display: 'flex', gap: 20, fontSize: 11, fontFamily: T.mono, color: T.textDim }}><StatChip label="TOTALE" value={stats.total} /><StatChip label="CALDO" value={stats.hot} color={T.accent} /><StatChip label="TIEPIDO" value={stats.warm} color={T.warm} /><StatChip label="FREDDO" value={stats.cold} color={T.cold} /><StatChip label="MEDIA" value={stats.avg} /></div><button onClick={handleExportHTML} title="Esporta HTML con lead attuali" style={{ background: 'transparent', fontSize: 16 }}>📥</button><button onClick={() => setIsSettingsOpen(true)} style={{ background: 'transparent', fontSize: 18 }}>⚙️</button></div>
+        </div>
+        <div style={{ display: 'flex', padding: '0 24px' }}><button style={tabStyle(activeTab === 'pipeline')} onClick={() => setActiveTab('pipeline')}>Lead con Score</button><button style={tabStyle(activeTab === 'scoring')} onClick={() => setActiveTab('scoring')}>Valuta Nuovo Lead</button></div>
+      </header>
+      {isSettingsOpen && <SettingsModal settings={settings} onSave={handleSaveSettings} onClose={() => setIsSettingsOpen(false)} />}
+      <main style={{ minHeight: 'calc(100vh - 150px)' }}>{activeTab === 'pipeline' ? <PipelinePage pipeline={pipeline} newestId={newestId} /> : <ScoringPage settings={settings} onSave={handleSave} onOpenSettings={() => setIsSettingsOpen(true)} />}</main>
+      <footer style={{ padding: '24px 32px', borderTop: `1px solid ${T.line}`, background: '#fff', fontSize: 10, color: T.textMuted, fontFamily: T.mono, display: 'flex', justifyContent: 'space-between' }}><div>RAILCONNECT B2B · GEMINI 2.5 GOOGLE SEARCH AGENT</div><div>V3.5 · ACCENTURE PROJECT</div></footer>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
