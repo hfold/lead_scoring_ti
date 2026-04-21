@@ -127,17 +127,20 @@ FORMATO JSON FINALE:
 }`;
 
 const GEMINI_LINKEDIN_PROMPT = `Sei un Agente di Ricerca HR esperto nell'uso di LinkedIn.
-Il tuo obiettivo è individuare figure chiave (Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer) in Italia per l'azienda assegnata.
+Il tuo obiettivo è individuare figure chiave in Italia (es. Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer) per l'azienda assegnata.
 
 STRATEGIA AGENTICA:
-- Usa Google Search inserendo diciture come: site:it.linkedin.com/in "Travel Manager" OR "Mobility" "NOME AZIENDA".
-- Recupera nome, cognome, ruolo esatto e il link al profilo LinkedIn.
+- Esegui ALMENO DUE ricerche su Google separate per massimizzare i risultati (es: 1. site:it.linkedin.com/in "Travel Manager" "NOME AZIENDA", 2. site:it.linkedin.com/in "Mobility" "NOME AZIENDA").
+- Il tuo scopo è estrarre più di un contatto utile, possibilmente 2 o 3. Assicurati che lavorino per l'azienda target in ITALIA.
+- Recupera nome, cognome, ruolo esatto copiato da LinkedIn.
+- Per il link: estrai ESATTAMENTE l'URL pubblico restituito da Google (es. https://it.linkedin.com/in/mario-rossi-12345). Evita di ricostruire il link inventando gli id finali. Controlla che le directory siano "/in/".
 - Restituisci ESCLUSIVAMENTE un JSON valido, formattato come un array di oggetti chiamato 'managers'. Non usare Markdown o virgolette doppie nei testi liberi.
 
 FORMATO JSON FINALE:
 {
   "managers": [
-    { "name": "Mario Rossi", "role": "Travel Manager Italy", "linkedin": "https://it.linkedin.com/in/mariorossi" }
+    { "name": "Mario Rossi", "role": "Travel Manager Italy", "linkedin": "https://www.linkedin.com/in/mariorossi-1a2b3c" },
+    { "name": "Giulia Bianchi", "role": "Fleet Manager", "linkedin": "https://it.linkedin.com/in/giuliabianchi" }
   ]
 }`;
 
