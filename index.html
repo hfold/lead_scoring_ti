@@ -403,8 +403,14 @@ function App() {
     if (isNetlify) {
       fetch('/.netlify/functions/leads')
         .then(r => r.json())
-        .then(data => { if (Array.isArray(data)) setPipeline(data); })
-        .catch(() => {})
+        .then(data => { 
+          if (Array.isArray(data)) {
+            setPipeline(data); 
+          } else {
+            console.error("Dati ricevuti al caricamento non sono un array:", data);
+          }
+        })
+        .catch(e => console.error("Errore fetch iniziale:", e))
         .finally(() => setLoadingLeads(false));
     } else {
       try {
@@ -432,8 +438,15 @@ function App() {
           body: JSON.stringify(newLead),
         });
         const updated = await res.json();
-        if (Array.isArray(updated)) setPipeline(updated);
-      } catch {
+        if (Array.isArray(updated)) {
+          setPipeline(updated);
+        } else {
+          alert("Ops! Errore di salvataggio remoto: " + JSON.stringify(updated));
+          console.error("Risposta inattesa:", updated);
+          setPipeline(p => [newLead, ...p]); // Fallback UI
+        }
+      } catch (e) {
+        alert("Ops! Errore di rete: " + e.message);
         setPipeline(p => [newLead, ...p]);
       }
     } else {
