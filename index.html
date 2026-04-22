@@ -137,22 +137,18 @@ STRATEGIA AGENTICA - esegui TUTTE queste ricerche in ordine:
 5. site:it.linkedin.com/in "fleet manager" "NOME AZIENDA"
 6. "NOME AZIENDA" "travel manager" OR "responsabile viaggi" site:it.linkedin.com
 
-RECUPERO URL PROFILO (passaggio obbligatorio):
-- Per ogni persona trovata nelle ricerche precedenti il cui URL LinkedIn non è stato restituito direttamente da Google, esegui una ricerca mirata: "NOME COGNOME" site:linkedin.com
-- Esempio: se hai trovato che "Arianna Filacchione" lavora in Enel come Head of Travel ma non hai l'URL, cerca: "Arianna Filacchione" site:linkedin.com — questo restituirà direttamente il link al profilo.
-- Usa l'URL ESATTO dal risultato Google. NON inventare o ricostruire URL. Se dopo la ricerca nominale l'URL non è ancora disponibile, allora e solo allora metti null.
-
 REGOLE DI INCLUSIONE:
 - Includi in "managers" qualsiasi profilo con ruolo chiaramente pertinente alla gestione viaggi aziendali per l'azienda target.
 - Preferisci profili attuali (Current position), ma includi anche recenti (<2 anni).
-- Metti in "discarded" SOLO profili esclusi per motivi chiari: ruolo completamente non pertinente (es. IT Manager, HR), azienda diversa, profilo inattivo da oltre 3 anni.
+- Per il campo "linkedin": se Google ha restituito l'URL esatto del profilo (formato https://it.linkedin.com/in/...), usalo. Altrimenti costruisci un link di ricerca Google: https://www.google.com/search?q="NOME+COGNOME"+"AZIENDA"+linkedin — che permetterà all'utente di trovare il profilo manualmente.
+- Metti in "discarded" SOLO profili esclusi per motivi chiari: ruolo non pertinente, azienda diversa, profilo inattivo da oltre 3 anni.
 - Restituisci ESCLUSIVAMENTE un JSON valido. Niente Markdown, niente virgolette doppie nei testi liberi.
 
 FORMATO JSON FINALE:
 {
   "managers": [
     { "name": "Mario Rossi", "role": "Travel Manager Italy", "linkedin": "https://it.linkedin.com/in/mariorossi-1a2b3c" },
-    { "name": "Giulia Bianchi", "role": "Head of Global Travel Governance", "linkedin": "https://it.linkedin.com/in/giuliabianchi" }
+    { "name": "Giulia Bianchi", "role": "Head of Global Travel Governance", "linkedin": "https://www.google.com/search?q=\"Giulia+Bianchi\"+\"Enel\"+linkedin" }
   ],
   "discarded": [
     { "name": "John Smith", "role": "IT Manager", "linkedin": "https://it.linkedin.com/in/johnsmith", "reason": "Ruolo non pertinente: IT Manager" }
@@ -707,10 +703,14 @@ function App() {
   const handleDelete = async (id) => {
     if (isNetlify) {
       try {
-        await fetch(`/.netlify/functions/leads?id=${id}`, { method: 'DELETE' });
-      } catch {}
+        const res = await fetch(`/.netlify/functions/leads?id=${id}`, { method: 'DELETE' });
+        const updated = await res.json();
+        if (Array.isArray(updated)) { setPipeline(updated); return; }
+        alert("Errore eliminazione: " + JSON.stringify(updated));
+      } catch (e) { alert("Errore di rete: " + e.message); }
+    } else {
+      setPipeline(p => p.filter(l => l.id !== id));
     }
-    setPipeline(p => p.filter(l => l.id !== id));
   };
 
   const stats = useMemo(() => {
