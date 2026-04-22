@@ -410,9 +410,14 @@ function PipelineRow({ lead, isNew, onDelete }) {
                        <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{m.name}</div>
                        <div style={{ fontSize: 11, color: T.textDim }}>{m.role}</div>
                      </div>
-                     {m.linkedin && m.linkedin !== '#' && (
-                       <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>LinkedIn ↗</a>
-                     )}
+                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                       {m.linkedin && m.linkedin !== '#' && (
+                         <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>LinkedIn ↗</a>
+                       )}
+                       {onDeleteContact && (
+                         <button onClick={(e) => { e.stopPropagation(); onDeleteContact(lead, i); }} style={{ color: '#e57373', background: 'transparent', border: 'none', fontSize: 12, cursor: 'pointer', padding: '0 4px' }} title="Rimuovi questo contatto">✕</button>
+                       )}
+                     </div>
                   </div>
                 ))}
               </div>
@@ -433,7 +438,7 @@ function PipelineRow({ lead, isNew, onDelete }) {
 }
 
 // ============ PAGES ============
-function PipelinePage({ pipeline, newestId, onDelete }) {
+function PipelinePage({ pipeline, newestId, onDelete, onDeleteContact }) {
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('All');
   const [scoreRange, setScoreRange] = useState([0, 100]);
@@ -479,7 +484,7 @@ function PipelinePage({ pipeline, newestId, onDelete }) {
           </div>
         </div>
       </div>
-      <div style={{ display: 'grid', gap: 10 }}>{filtered.map(l => <PipelineRow key={l.id} lead={l} isNew={l.id === newestId} onDelete={onDelete} />)}</div>
+      <div style={{ display: 'grid', gap: 10 }}>{filtered.map(l => <PipelineRow key={l.id} lead={l} isNew={l.id === newestId} onDelete={onDelete} onDeleteContact={onDeleteContact} />)}</div>
     </div>
   );
 }
@@ -502,48 +507,9 @@ function ScoringPage({ onSave }) {
     try {
       addLog(`Avvio ricerca parallela (Analisi + LinkedIn Step 1) su ${name}...`, 'step');
       
-      // Funzione wrapper per gestire il doppio step di LinkedIn
-      const runLinkedInPipeline = async () => {
-        let step1Res = null;
-        try {
-          step1Res = await callGemini_Agent(null, 'gemini-2.5-flash', linkedinMessages, msg => addLog(`[LinkedIn] ${msg}`));
-        } catch (e) {
-          throw e; // Rilanciamo l'errore per farlo gestire a Promise.allSettled
-        }
-        
-        let candidates = step1Res?.managers || [];
-        // Se non troviamo nessuno, possiamo fermarci qui
-        if (candidates.length === 0) return step1Res;
-
-        addLog(`[LinkedIn Step 2] Trovati ${candidates.length} candidati potenziali. Avvio verifica incrociata (nome + azienda + linkedin)...`, 'step');
-        
-        const step2Prompt = `Sei un Agente Verificatore. Ti passo una lista di nomi candidati come Travel/Mobility Manager in "${name}".
-ATTENZIONE: Devi eseguire obbligatoriamente una o più query Google del tipo: "NOME COGNOME" "NOME AZIENDA" linkedin 
-Se i risultati confermano che lavorano ANCORA e in ITALIA per ${name} nel ruolo target, tienili in managers.
-Se non trovi riscontri convincenti, o lavorano da un'altra parte o all'estero, scartali in discarded.
-Sii molto severo. Se la persona è sbagliata, scartala. 
-Assicurati di validare e pulire il link inserito, rimuovendo query string o estensioni inutili. Inserisci link puri (es. https://www.linkedin.com/in/mariorossi-12345).
-
-FORMATO JSON FINALE ATTESO ESATTO:
-{ "managers": [...], "discarded": [...] }`;
-
-        const step2Messages = [
-          { role: 'system', content: step2Prompt },
-          { role: 'user', content: `Verifica i seguenti candidati trovati per l'azienda ${name}: \n\n` + JSON.stringify(candidates, null, 2) }
-        ];
-
-        try {
-          const step2Res = await callGemini_Agent(null, 'gemini-2.5-flash', step2Messages, msg => addLog(`[LinkedIn Verifica] ${msg}`));
-          return step2Res;
-        } catch (e) {
-          addLog(`[LinkedIn Verifica] Errore nello Step 2: ${e.message}. Uso i dati dello Step 1.`, 'log');
-          return step1Res; // Fallback to step 1
-        }
-      };
-
       const results = await Promise.allSettled([
         callGemini_Agent(null, 'gemini-2.5-flash', messages.current, msg => addLog(`[Analisi] ${msg}`)),
-        runLinkedInPipeline()
+        callGemini_Agent(null, 'gemini-2.5-flash', linkedinMessages, msg => addLog(`[LinkedIn] ${msg}`))
       ]);
 
       const baseResult = results[0];
@@ -563,14 +529,6 @@ FORMATO JSON FINALE ATTESO ESATTO:
             addLog(`[LinkedIn DEBUG] Raw from AI:\n${linkedinResult.reason.rawContent}`, 'log');
          }
       }
-
-      // Combina discarded preesistenti dello step 1 con eventuali discarded dello step 2 (se presenti)
-      const allDiscarded = [
-         ...(linkedinData.discarded || []),
-         // Il primo result potrebbe avere discarded che perdiamo col return del secondo, 
-         // ma siccome l'LLM2 sa tutto se glielo passassimo. 
-         // Per semplicità usiamo l'output finale del secondo (che valuta solo i manager passati).
-      ];
 
       setResult({ ...baseData, managers: linkedinData.managers || [], discarded_managers: linkedinData.discarded || [], name });
       setState('RESULT');
@@ -633,9 +591,12 @@ FORMATO JSON FINALE ATTESO ESATTO:
                           <div style={{ fontSize: 13, fontWeight: 600 }}>{m.name}</div>
                           <div style={{ fontSize: 11, color: T.textDim }}>{m.role}</div>
                         </div>
-                        {m.linkedin && m.linkedin !== '#' && (
-                          <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 12 }}>LinkedIn ↗</a>
-                        )}
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                          {m.linkedin && m.linkedin !== '#' && (
+                            <a href={m.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0A66C2', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 12 }}>LinkedIn ↗</a>
+                          )}
+                          <button onClick={() => setResult(prev => ({ ...prev, managers: prev.managers.filter((_, idx) => idx !== i) }))} style={{ color: '#e57373', background: 'transparent', border: 'none', fontSize: 12, cursor: 'pointer', padding: '0 4px' }} title="Rimuovi questo contatto">✕</button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -775,6 +736,12 @@ function App() {
     }
   };
 
+  const handleDeleteContact = async (lead, managerIndex) => {
+    if (!window.confirm("Rimuovere definitivamente questo contatto dal database?")) return;
+    const updatedLead = { ...lead, managers: lead.managers.filter((_, i) => i !== managerIndex) };
+    await handleSave(updatedLead);
+  };
+
   const stats = useMemo(() => {
     const scored = pipeline.map(l => ({ ...l, _score: computeScore(l) }));
     return { total: scored.length, hot: scored.filter(l => l._score >= 75).length, warm: scored.filter(l => l._score >= 45 && l._score < 75).length, cold: scored.filter(l => l._score < 45).length, avg: scored.length ? Math.round(scored.reduce((s, l) => s + l._score, 0) / scored.length) : 0 };
@@ -791,7 +758,7 @@ function App() {
         </div>
         <div style={{ display: 'flex', padding: '0 24px' }}><button style={tabStyle(activeTab === 'pipeline')} onClick={() => setActiveTab('pipeline')}>Lead con Score</button><button style={tabStyle(activeTab === 'scoring')} onClick={() => setActiveTab('scoring')}>Valuta Nuovo Lead</button></div>
       </header>
-      <main style={{ minHeight: 'calc(100vh - 150px)' }}>{activeTab === 'pipeline' ? <PipelinePage pipeline={pipeline} newestId={newestId} onDelete={handleDelete} /> : <ScoringPage onSave={handleSave} />}</main>
+      <main style={{ minHeight: 'calc(100vh - 150px)' }}>{activeTab === 'pipeline' ? <PipelinePage pipeline={pipeline} newestId={newestId} onDelete={handleDelete} onDeleteContact={handleDeleteContact} /> : <ScoringPage onSave={handleSave} />}</main>
       <footer style={{ padding: '24px 32px', borderTop: `1px solid ${T.line}`, background: '#fff', fontSize: 10, color: T.textMuted, fontFamily: T.mono, display: 'flex', justifyContent: 'space-between' }}><div>RAILCONNECT B2B · GEMINI 2.5 GOOGLE SEARCH AGENT</div><div>V3.5 · ACCENTURE PROJECT</div></footer>
     </div>
   );
