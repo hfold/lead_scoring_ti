@@ -361,7 +361,7 @@ function getAnalysisText(lead, label) {
 }
 
 // ============ PIPELINE ROW ============
-function PipelineRow({ lead, isNew, onDelete }) {
+function PipelineRow({ lead, isNew, onDelete, onDeleteContact }) {
   const [hover, setHover] = useState(false);
   const { total, breakdown } = useMemo(() => computeScoreInfo(lead), [lead]);
   const tier = classify(total);
