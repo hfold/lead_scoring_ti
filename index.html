@@ -127,9 +127,10 @@ FORMATO JSON FINALE:
 }`;
 
 const GEMINI_LINKEDIN_PROMPT = `Sei un Agente di Ricerca HR esperto nell'uso di LinkedIn e Google.
-Il tuo obiettivo è trovare figure chiave in Italia per la gestione viaggi aziendali (Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer, Head of Travel, Responsabile Viaggi, Category Manager Travel, Procurement Travel) per l'azienda assegnata.
+Il tuo obiettivo è trovare SOLO figure italiane con ruolo DIRETTO nella gestione viaggi aziendali per l'azienda assegnata.
+Ruoli target (accettati): Travel Manager, Mobility Manager, Fleet Manager, Corporate Travel Buyer, Head of Travel, Responsabile Viaggi, Category Manager Travel, Procurement Travel.
 
-STRATEGIA AGENTICA - esegui TUTTE queste ricerche in ordine:
+FASE 1 — RICERCA (esegui TUTTE le query):
 1. site:it.linkedin.com/in "travel manager" "NOME AZIENDA"
 2. site:it.linkedin.com/in "mobility manager" "NOME AZIENDA"
 3. site:it.linkedin.com/in "corporate travel" "NOME AZIENDA"
@@ -137,21 +138,35 @@ STRATEGIA AGENTICA - esegui TUTTE queste ricerche in ordine:
 5. site:it.linkedin.com/in "fleet manager" "NOME AZIENDA"
 6. "NOME AZIENDA" "travel manager" OR "responsabile viaggi" site:it.linkedin.com
 
-REGOLE DI INCLUSIONE:
-- Includi in "managers" qualsiasi profilo con ruolo chiaramente pertinente alla gestione viaggi aziendali per l'azienda target.
-- Preferisci profili attuali (Current position), ma includi anche recenti (<2 anni).
-- Per il campo "linkedin": se Google ha restituito l'URL esatto del profilo (formato https://it.linkedin.com/in/...), usalo. Altrimenti costruisci un link di ricerca Google: https://www.google.com/search?q="NOME+COGNOME"+"AZIENDA"+linkedin — che permetterà all'utente di trovare il profilo manualmente.
-- Metti in "discarded" SOLO profili esclusi per motivi chiari: ruolo non pertinente, azienda diversa, profilo inattivo da oltre 3 anni.
-- Restituisci ESCLUSIVAMENTE un JSON valido. Niente Markdown, niente virgolette doppie nei testi liberi.
+Ogni risultato produce un profilo CANDIDATO. I candidati passano alla Fase 2.
 
-FORMATO JSON FINALE:
+FASE 2 — CONTROVERIFICA OBBLIGATORIA (per ogni candidato):
+Per ciascun candidato esegui la ricerca: "NOME COGNOME" "NOME AZIENDA" site:linkedin.com
+Poi valuta questi 3 criteri — basta UN fallimento per scartare il profilo:
+  [A] AZIENDA CORRETTA: il profilo menziona NOME AZIENDA come datore di lavoro ATTUALE (non come cliente, non come precedente employer)
+  [B] RUOLO PERTINENTE: il titolo della posizione attuale contiene esplicitamente una parola chiave travel/mobility/fleet/viaggi
+  [C] LOCALIZZAZIONE ITALIANA: la localizzazione sul profilo è in Italia (non UK, Germania, Spagna, USA, ecc.)
+
+Se il candidato supera tutti e tre i criteri → va in "managers".
+Se fallisce anche solo uno → va in "discarded" con il criterio fallito come "reason".
+
+REGOLE AGGIUNTIVE:
+- In caso di dubbio su uno dei criteri, SCARTA il profilo (preferisci precisione a recall).
+- Non includere profili dove NOME AZIENDA compare solo come cliente o partner.
+- Non includere profili dove il ruolo travel compare solo in esperienze passate.
+- Per "linkedin": usa l'URL esatto se disponibile (es. https://it.linkedin.com/in/nomecognome). Altrimenti: https://www.google.com/search?q="NOME+COGNOME"+"NOME AZIENDA"+linkedin
+
+Restituisci ESCLUSIVAMENTE un JSON valido. Niente Markdown.
+
+FORMATO JSON:
 {
   "managers": [
-    { "name": "Mario Rossi", "role": "Travel Manager Italy", "linkedin": "https://it.linkedin.com/in/mariorossi-1a2b3c" },
-    { "name": "Giulia Bianchi", "role": "Head of Global Travel Governance", "linkedin": "https://www.google.com/search?q=\"Giulia+Bianchi\"+\"Enel\"+linkedin" }
+    { "name": "Arianna Filacchione", "role": "Head of Global Travel Governance", "linkedin": "https://it.linkedin.com/in/arianna-filacchione" }
   ],
   "discarded": [
-    { "name": "John Smith", "role": "IT Manager", "linkedin": "https://it.linkedin.com/in/johnsmith", "reason": "Ruolo non pertinente: IT Manager" }
+    { "name": "Milena Bernardini", "role": "Manager", "reason": "[B] Ruolo attuale non pertinente alla gestione viaggi" },
+    { "name": "John Smith", "role": "Travel Manager UK", "reason": "[C] Localizzazione non italiana (UK)" },
+    { "name": "Laura Conti", "role": "Travel Manager", "reason": "[A] Lavora per altra azienda, NOME AZIENDA citata come cliente" }
   ]
 }`;
 
