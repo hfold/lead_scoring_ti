@@ -500,11 +500,50 @@ function ScoringPage({ onSave }) {
     const linkedinMessages = [{ role: "system", content: GEMINI_LINKEDIN_PROMPT }, { role: "user", content: `Trova i responsabili Travel/Mobility su LinkedIn Italia per l'azienda: ${name}.` }];
 
     try {
-      addLog(`Avvio ricerca parallela (Analisi + LinkedIn) su ${name}...`, 'step');
+      addLog(`Avvio ricerca parallela (Analisi + LinkedIn Step 1) su ${name}...`, 'step');
       
+      // Funzione wrapper per gestire il doppio step di LinkedIn
+      const runLinkedInPipeline = async () => {
+        let step1Res = null;
+        try {
+          step1Res = await callGemini_Agent(null, 'gemini-2.5-flash', linkedinMessages, msg => addLog(`[LinkedIn] ${msg}`));
+        } catch (e) {
+          throw e; // Rilanciamo l'errore per farlo gestire a Promise.allSettled
+        }
+        
+        let candidates = step1Res?.managers || [];
+        // Se non troviamo nessuno, possiamo fermarci qui
+        if (candidates.length === 0) return step1Res;
+
+        addLog(`[LinkedIn Step 2] Trovati ${candidates.length} candidati potenziali. Avvio verifica incrociata (nome + azienda + linkedin)...`, 'step');
+        
+        const step2Prompt = `Sei un Agente Verificatore. Ti passo una lista di nomi candidati come Travel/Mobility Manager in "${name}".
+ATTENZIONE: Devi eseguire obbligatoriamente una o più query Google del tipo: "NOME COGNOME" "NOME AZIENDA" linkedin 
+Se i risultati confermano che lavorano ANCORA e in ITALIA per ${name} nel ruolo target, tienili in managers.
+Se non trovi riscontri convincenti, o lavorano da un'altra parte o all'estero, scartali in discarded.
+Sii molto severo. Se la persona è sbagliata, scartala. 
+Assicurati di validare e pulire il link inserito, rimuovendo query string o estensioni inutili. Inserisci link puri (es. https://www.linkedin.com/in/mariorossi-12345).
+
+FORMATO JSON FINALE ATTESO ESATTO:
+{ "managers": [...], "discarded": [...] }`;
+
+        const step2Messages = [
+          { role: 'system', content: step2Prompt },
+          { role: 'user', content: `Verifica i seguenti candidati trovati per l'azienda ${name}: \n\n` + JSON.stringify(candidates, null, 2) }
+        ];
+
+        try {
+          const step2Res = await callGemini_Agent(null, 'gemini-2.5-flash', step2Messages, msg => addLog(`[LinkedIn Verifica] ${msg}`));
+          return step2Res;
+        } catch (e) {
+          addLog(`[LinkedIn Verifica] Errore nello Step 2: ${e.message}. Uso i dati dello Step 1.`, 'log');
+          return step1Res; // Fallback to step 1
+        }
+      };
+
       const results = await Promise.allSettled([
         callGemini_Agent(null, 'gemini-2.5-flash', messages.current, msg => addLog(`[Analisi] ${msg}`)),
-        callGemini_Agent(null, 'gemini-2.5-flash', linkedinMessages, msg => addLog(`[LinkedIn] ${msg}`))
+        runLinkedInPipeline()
       ]);
 
       const baseResult = results[0];
@@ -524,6 +563,14 @@ function ScoringPage({ onSave }) {
             addLog(`[LinkedIn DEBUG] Raw from AI:\n${linkedinResult.reason.rawContent}`, 'log');
          }
       }
+
+      // Combina discarded preesistenti dello step 1 con eventuali discarded dello step 2 (se presenti)
+      const allDiscarded = [
+         ...(linkedinData.discarded || []),
+         // Il primo result potrebbe avere discarded che perdiamo col return del secondo, 
+         // ma siccome l'LLM2 sa tutto se glielo passassimo. 
+         // Per semplicità usiamo l'output finale del secondo (che valuta solo i manager passati).
+      ];
 
       setResult({ ...baseData, managers: linkedinData.managers || [], discarded_managers: linkedinData.discarded || [], name });
       setState('RESULT');
